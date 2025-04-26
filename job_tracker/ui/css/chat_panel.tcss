@@ -1,0 +1,43 @@
+/* Floating chat panel — right-hand overlay */
+ChatPanel {
+    dock: right;
+    width: 30%;
+    layout: vertical;
+}
+
+/* message history */
+#chat-history {
+    height: 1fr;
+    overflow-y: scroll;
+    border-bottom: solid $primary-darken-2;
+}
+
+#chat-header {
+    height: 2;
+    layout: horizontal;
+    align: left middle;
+    background: $primary;
+    color: $text;
+}
+
+/* input strip at the bottom */
+#chat-input-container {
+    height: 3;
+    width: 100%;
+    layout: horizontal;
+    background: $surface-darken-2;
+}
+
+#chat-input { 
+    width: 1fr; 
+    margin: 0;
+}
+
+#chat-send { 
+    width: 10; 
+    margin: 0;
+}
+
+/* simple colours */
+.user-message { color: $text; }
+.assistant-message { color: $accent; }

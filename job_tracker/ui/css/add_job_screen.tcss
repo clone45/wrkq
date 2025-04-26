@@ -1,0 +1,60 @@
+/* job_tracker/ui/screens/add_job_screen.tcss */
+
+AddJobScreen {
+    align: center middle;
+}
+
+#add-job-dialog {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    grid-rows: auto 1fr auto; /* Title, Form, Buttons */
+    padding: 0 1;
+    width: 60; /* Fixed width */
+    max-width: 80%;
+    height: 24; /* Fixed height */
+    max-height: 80%;
+    border: thick $accent;
+    background: $surface;
+}
+
+#add-job-title {
+    column-span: 2;
+    text-align: center;
+    width: 100%;
+    padding: 1 0;
+    text-style: bold;
+}
+
+#add-job-form {
+    column-span: 2;
+    /* Optional: Add padding inside the scroll area */
+    /* padding: 1; */
+}
+
+#add-job-form > Label {
+    margin: 1 0 0 0; /* Add space above labels */
+    text-style: bold;
+    color: $accent-lighten-1;
+}
+
+#add-job-form > Input {
+    margin-bottom: 1; /* Add space below inputs */
+}
+
+.add-job-notes-area {
+    height: 5; /* Give text area a specific height */
+    border: round $accent;
+    margin-bottom: 1;
+}
+
+#add-job-buttons {
+    column-span: 2;
+    align: center middle;
+    height: auto;
+    padding-top: 1;
+}
+
+#add-job-buttons > Button {
+    width: auto;
+    margin: 0 2;
+}
