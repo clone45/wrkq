@@ -1,5 +1,5 @@
 """
-Configuration settings for the MongoDB Job Tracker
+Configuration settings for the SQLite Job Tracker
 """
 
 import os
@@ -8,12 +8,8 @@ from typing import Dict, Any
 
 
 DEFAULT_CONFIG = {
-    "mongodb": {
-        "uri": "mongodb://localhost:27017/",
-        "database": "jobs_database",
-        "jobs_collection": "jobs",
-        "companies_collection": "companies",
-        "applications_collection": "applications"
+    "sqlite": {
+        "db_path": "job_tracker/db/data/sqlite.db",
     },
     "ui": {
         "per_page": 15,
@@ -41,11 +37,8 @@ def load_config() -> Dict[str, Any]:
             print(f"Error loading config file: {e}")
     
     # Override with environment variables
-    if os.environ.get("MONGODB_URI"):
-        config["mongodb"]["uri"] = os.environ.get("MONGODB_URI")
-    
-    if os.environ.get("MONGODB_DATABASE"):
-        config["mongodb"]["database"] = os.environ.get("MONGODB_DATABASE")
+    if os.environ.get("SQLITE_DB_PATH"):
+        config["sqlite"]["db_path"] = os.environ.get("SQLITE_DB_PATH")
     
     return config
 

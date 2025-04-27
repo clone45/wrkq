@@ -2,8 +2,6 @@ my_log.txt
 job_tracker.log
 *.log
 
-db/data
-db/data/sqlite.db
 job_tracker/db/data/sqlite.db
 
 # Python bytecode files
@@ -30,3 +28,4 @@ build/
 # Testing
 .coverage
 htmlcov/
+

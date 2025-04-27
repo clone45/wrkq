@@ -8,19 +8,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from bson.objectid import ObjectId
-from pymongo import DESCENDING
-from pymongo.errors import OperationFailure
-
-from job_tracker.db.connection import MongoDBConnection
+from job_tracker.db.connection import SQLiteConnection
 from job_tracker.models.job import Job
 
 
 class JobRepo:
-    """CRUD access for Job documents."""
+    """CRUD access for Job records."""
 
-    def __init__(self, db: MongoDBConnection, col_name: str = "jobs") -> None:
-        self._col = db.col(col_name)
+    def __init__(self, db: SQLiteConnection, table_name: str = "jobs") -> None:
+        self._db = db
+        self._table = table_name
 
     # ---------- read side --------------------------------------------------
 
@@ -34,60 +31,143 @@ class JobRepo:
         """Return a page of jobs as `Job` models."""
         filters = filters or {}
         skip = (page - 1) * per_page
-        cursor = (
-            self._col.find(filters)
-            .sort([("_id", DESCENDING)])
-            .skip(skip)
-            .limit(per_page)
-        )
-        return [Job.from_mongo(doc) for doc in cursor]
+        
+        # Basic query without filters
+        query = f"SELECT * FROM {self._table}"
+        params = []
+        
+        # Add filters if provided
+        if filters:
+            where_clauses = []
+            if '$or' in filters:
+                or_clauses = []
+                for condition in filters['$or']:
+                    for field, regex in condition.items():
+                        if isinstance(regex, dict) and '$regex' in regex:
+                            search_term = f"%{regex['$regex']}%"
+                            or_clauses.append(f"{field} LIKE ?")
+                            params.append(search_term)
+                if or_clauses:
+                    where_clauses.append(f"({' OR '.join(or_clauses)})")
+            
+            # Handle hidden filter
+            if 'hidden' in filters and '$ne' in filters['hidden']:
+                where_clauses.append("(hidden != 1 OR hidden IS NULL)")
+            
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+                
+        # Add ordering and pagination
+        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, skip])
+        
+        cursor = self._db.cursor()
+        cursor.execute(query, params)
+        return [Job.from_sqlite(dict(row)) for row in cursor.fetchall()]
 
     def count(self, filters: Dict | None = None) -> int:
         """Total jobs matching filters."""
-        return self._col.count_documents(filters or {})
+        filters = filters or {}
+        
+        # Basic count query
+        query = f"SELECT COUNT(*) FROM {self._table}"
+        params = []
+        
+        # Add filters if provided
+        if filters:
+            where_clauses = []
+            if '$or' in filters:
+                or_clauses = []
+                for condition in filters['$or']:
+                    for field, regex in condition.items():
+                        if isinstance(regex, dict) and '$regex' in regex:
+                            search_term = f"%{regex['$regex']}%"
+                            or_clauses.append(f"{field} LIKE ?")
+                            params.append(search_term)
+                if or_clauses:
+                    where_clauses.append(f"({' OR '.join(or_clauses)})")
+            
+            # Handle hidden filter
+            if 'hidden' in filters and '$ne' in filters['hidden']:
+                where_clauses.append("(hidden != 1 OR hidden IS NULL)")
+            
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+        
+        cursor = self._db.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchone()[0]
 
     def by_id(self, job_id: str) -> Optional[Job]:
         """Find a job by id and return a model (or None)."""
-        doc = self._col.find_one({"_id": ObjectId(job_id)})
-        return Job.from_mongo(doc) if doc else None
+        cursor = self._db.cursor()
+        cursor.execute(f"SELECT * FROM {self._table} WHERE id = ?", (job_id,))
+        row = cursor.fetchone()
+        return Job.from_sqlite(dict(row)) if row else None
 
     # ---------- write side -------------------------------------------------
 
     def update(self, job_id: str, updates: Dict) -> bool:
         """Partial update; returns True on success."""
-        result = self._col.update_one(
-            {"_id": ObjectId(job_id)}, {"$set": updates}
-        )
-        return result.modified_count > 0
+        if not updates:
+            return False
+            
+        set_clauses = []
+        params = []
+        
+        for key, value in updates.items():
+            set_clauses.append(f"{key} = ?")
+            # Convert datetime to string if needed
+            if isinstance(value, datetime):
+                params.append(value.isoformat())
+            else:
+                params.append(value)
+                
+        params.append(job_id)
+        
+        query = f"UPDATE {self._table} SET {', '.join(set_clauses)} WHERE id = ?"
+        
+        cursor = self._db.cursor()
+        cursor.execute(query, params)
+        self._db.commit()
+        return cursor.rowcount > 0
 
     def hide(self, job_id: str) -> bool:
         """Mark a job as hidden."""
         return self.update(
-            job_id, {"hidden": True, "hidden_date": datetime.utcnow()}
+            job_id, {"hidden": 1, "hidden_date": datetime.utcnow().isoformat()}
         )
 
     def add(self, job: Job) -> Optional[Job]:
         """Insert a new job; returns the stored model with generated id."""
-        doc = job.to_mongo()
-        # Let Mongo generate _id if missing
-        if "_id" in doc and not doc["_id"]:
-            doc.pop("_id")
+        doc = job.to_sqlite()
+        
+        fields = ", ".join(doc.keys())
+        placeholders = ", ".join(["?"] * len(doc))
+        values = list(doc.values())
+        
+        cursor = self._db.cursor()
         try:
-            inserted = self._col.insert_one(doc)
-            doc["_id"] = inserted.inserted_id
-            return Job.from_mongo(doc)
-        except OperationFailure as e:
-            print(f"Database operation failed while adding job: {e}")
-            return None
+            cursor.execute(
+                f"INSERT INTO {self._table} ({fields}) VALUES ({placeholders})",
+                values
+            )
+            self._db.commit()
+            
+            # Get the last inserted ID
+            job_id = cursor.lastrowid
+            return self.by_id(str(job_id))
         except Exception as e:
-            print(f"Unexpected error while adding job: {e}")
+            print(f"Error adding job: {e}")
             return None
         
     def delete(self, job_id: str) -> bool:
         """Delete a job completely from the database."""
         try:
-            result = self._col.delete_one({"_id": ObjectId(job_id)})
-            return result.deleted_count > 0
+            cursor = self._db.cursor()
+            cursor.execute(f"DELETE FROM {self._table} WHERE id = ?", (job_id,))
+            self._db.commit()
+            return cursor.rowcount > 0
         except Exception as e:
             print(f"Error deleting job: {e}")
             return False

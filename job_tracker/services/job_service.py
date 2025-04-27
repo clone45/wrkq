@@ -12,7 +12,6 @@ from job_tracker.db.repos.job_repo import JobRepo
 from job_tracker.models.company import Company
 from job_tracker.models.job import Job
 from job_tracker.models.pagination import Page
-from job_tracker.models.user import User
 
 
 class JobService:
@@ -61,28 +60,25 @@ class JobService:
     def hide(self, job_id: str) -> bool:
         return self._jobs.hide(job_id)
 
-    def add(self, *, template: Job, user: User) -> Optional[Job]:
+    def add(self, *, template: Job) -> Optional[Job]:
         """
-        Persist a new job. `template` may omit id/company_id/user_id;
+        Persist a new job. `template` may omit id/company_id;
         those will be filled in here.
         """
-        company = self._ensure_company(template.company, user.id)
+        company = self._ensure_company(template.company)
         if company is None:
             return None
 
         job_to_store = Job(
             **{
                 **template.__dict__,
-                "id": "",  # let Mongo assign
+                "id": "",  # let SQLite assign
                 "company_id": company.id,
-                "user_id": user.id,
             }
         )
         stored = self._jobs.add(job_to_store)
         if stored:
-            self._companies.increment_job_count(
-                company_id=company.id, user_id=user.id
-            )
+            self._companies.increment_job_count(company_id=company.id)
         return stored
 
     def delete(self, job_id: str) -> bool:
@@ -108,7 +104,5 @@ class JobService:
         return filters
 
     # internal
-    def _ensure_company(self, company_name: str, user_id: str) -> Company | None:
-        return self._companies.find_or_create(
-            company_name=company_name, user_id=user_id
-        )
+    def _ensure_company(self, company_name: str) -> Company | None:
+        return self._companies.find_or_create(company_name=company_name)

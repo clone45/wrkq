@@ -31,7 +31,6 @@ class AddJobScreen(Screen):
         self,
         job_repo: JobRepo,
         company_repo: CompanyRepo,
-        user_id: str,
         *,
         name: str | None = None,
         id: str | None = None,
@@ -43,12 +42,10 @@ class AddJobScreen(Screen):
         Args:
             job_repo: Repository for job operations
             company_repo: Repository for company operations
-            user_id: ID of the current user
         """
         super().__init__(name=name, id=id, classes=classes)
         self.job_repo = job_repo
         self.company_repo = company_repo
-        self.user_id = user_id
         self.show_help = False
         
         # Common sources for job listings
@@ -238,8 +235,7 @@ class AddJobScreen(Screen):
         
         # Find or create company
         try:
-            # Use the existing method with named parameters
-            company = self.company_repo.find_or_create(company_name=company_name, user_id=self.user_id)
+            company = self.company_repo.find_or_create(company_name=company_name)
             company_id = str(company.id) if company else None
             
             if not company_id:
@@ -261,9 +257,8 @@ class AddJobScreen(Screen):
         
         # Create new job object
         new_job = Job(
-            id="",  # This will be assigned by MongoDB
+            id="",  # This will be assigned by SQLite
             company_id=company_id,
-            user_id=self.user_id,
             company=company_name,
             title=job_title,
             location=location or "",
@@ -273,7 +268,8 @@ class AddJobScreen(Screen):
             hidden_date=None,
             created_at=datetime.now(),
             job_description=job_description or None,
-            # Add any other fields your Job model requires
+            site_name=source,
+            details_link=job_url
         )
         
         # Save to database

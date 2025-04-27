@@ -1,6 +1,6 @@
 # job_tracker/db/repos/company_repo.py
 """
-Repository for company operations – model-centric version.
+Repository for company operations.
 """
 
 from __future__ import annotations
@@ -8,38 +8,84 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from bson.objectid import ObjectId
-from pymongo.errors import OperationFailure
-
-from job_tracker.db.connection import MongoDBConnection
+from job_tracker.db.connection import SQLiteConnection
 from job_tracker.models.company import Company
 
 
 class CompanyRepo:
-    """CRUD access for Company documents."""
+    """CRUD access for Company records."""
 
-    def __init__(self, db: MongoDBConnection, col_name: str = "companies") -> None:
-        self._col = db.col(col_name)
+    def __init__(self, db: SQLiteConnection, table_name: str = "companies") -> None:
+        self._db = db
+        self._table = table_name
+        self._history_table = "history"
 
     # ---------- read side --------------------------------------------------
 
     def list(self, filters: Dict | None = None) -> List[Company]:
         """Return all companies that match filters."""
-        return [Company.from_mongo(doc) for doc in self._col.find(filters or {})]
+        filters = filters or {}
+        
+        # Basic query without filters
+        query = f"SELECT * FROM {self._table}"
+        params = []
+        
+        # Add filters if provided
+        if filters:
+            where_clauses = []
+            
+            # Handle name search
+            if 'name' in filters:
+                where_clauses.append("name LIKE ?")
+                params.append(f"%{filters['name']}%")
+            
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+                
+        # Add ordering
+        query += " ORDER BY id DESC"
+        
+        cursor = self._db.cursor()
+        cursor.execute(query, params)
+        return [Company.from_sqlite(dict(row)) for row in cursor.fetchall()]
 
     def by_id(self, company_id: str) -> Optional[Company]:
-        doc = self._col.find_one({"_id": ObjectId(company_id)})
-        return Company.from_mongo(doc) if doc else None
+        """Find a company by id and return a model (or None)."""
+        cursor = self._db.cursor()
+        cursor.execute(f"SELECT * FROM {self._table} WHERE id = ?", (company_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            return None
+            
+        company = Company.from_sqlite(dict(row))
+        
+        # Load history records for this company from the history table
+        cursor.execute(
+            f"SELECT * FROM {self._history_table} WHERE company_id = ? ORDER BY id DESC", 
+            (company_id,)
+        )
+        history_records = [dict(record) for record in cursor.fetchall()]
+        
+        # Create a new company with history
+        return Company(
+            id=company.id,
+            name=company.name,
+            job_count=company.job_count,
+            history=history_records,
+            created_at=company.created_at,
+            original_id=company.original_id
+        )
 
     # ---------- write side -------------------------------------------------
 
-    def find_or_create(self, *, company_name: str, user_id: str) -> Company | None:
+    def find_or_create(self, *, company_name: str) -> Company | None:
         """
-        Fetch (case-insensitive) or create a company for the given user.
+        Fetch (case-insensitive) or create a company.
         Returns the Company model or None on error.
         """
-        if not company_name or not user_id:
-            print("Error: company_name and user_id are required.")
+        if not company_name:
+            print("Error: company_name is required.")
             return None
 
         original = company_name.strip()
@@ -47,47 +93,72 @@ class CompanyRepo:
             print("Error: company name cannot be empty.")
             return None
 
-        lower_name = original.lower()
-
         try:
-            doc = self._col.find_one(
-                {"name_lower": lower_name, "user_id": ObjectId(user_id)}
+            # SQLite COLLATE NOCASE for case-insensitive search
+            cursor = self._db.cursor()
+            cursor.execute(
+                f"SELECT * FROM {self._table} WHERE name = ? COLLATE NOCASE", 
+                (original,)
             )
-            if doc:
-                return Company.from_mongo(doc)
+            row = cursor.fetchone()
+            
+            if row:
+                return Company.from_sqlite(dict(row))
 
             # --- create new ---
             now = datetime.utcnow()
             new_company = Company(
-                id="",  # let Mongo assign
-                user_id=user_id,
+                id="",  # let SQLite assign
                 name=original,
                 job_count=0,
                 history=[],
                 created_at=now,
             )
-            mongo_doc = new_company.to_mongo()
-            # add search field
-            mongo_doc["name_lower"] = lower_name
-            inserted = self._col.insert_one(mongo_doc)
-            mongo_doc["_id"] = inserted.inserted_id
-            return Company.from_mongo(mongo_doc)
+            
+            doc = new_company.to_sqlite()
+            
+            fields = ", ".join(doc.keys())
+            placeholders = ", ".join(["?"] * len(doc))
+            values = list(doc.values())
+            
+            cursor.execute(
+                f"INSERT INTO {self._table} ({fields}) VALUES ({placeholders})",
+                values
+            )
+            self._db.commit()
+            
+            # Get the last inserted ID
+            company_id = cursor.lastrowid
+            return self.by_id(str(company_id))
 
-        except OperationFailure as e:
-            print(f"Database operation failed in find_or_create_company: {e}")
-            return None
         except Exception as e:
             print(f"Unexpected error in find_or_create_company: {e}")
             return None
 
-    def increment_job_count(self, *, company_id: str, user_id: str) -> bool:
+    def increment_job_count(self, *, company_id: str) -> bool:
         """Increase job_count by 1; returns True if updated."""
         try:
-            res = self._col.update_one(
-                {"_id": ObjectId(company_id), "user_id": ObjectId(user_id)},
-                {"$inc": {"job_count": 1}},
+            cursor = self._db.cursor()
+            cursor.execute(
+                f"UPDATE {self._table} SET job_count = job_count + 1 WHERE id = ?",
+                (company_id,)
             )
-            return res.modified_count > 0
+            self._db.commit()
+            return cursor.rowcount > 0
         except Exception as e:
             print(f"Error incrementing job count: {e}")
             return False
+            
+    def add_history_entry(self, company_id: str, action: str, job_id: Optional[str] = None, 
+                         application_id: Optional[str] = None) -> bool:
+        """Add a history entry to the company in the history table."""
+        cursor = self._db.cursor()
+        timestamp = datetime.utcnow().isoformat()
+        
+        cursor.execute(
+            f"INSERT INTO {self._history_table} (company_id, action, job_id, application_id, timestamp) "
+            f"VALUES (?, ?, ?, ?, ?)",
+            (company_id, action, job_id, application_id, timestamp)
+        )
+        self._db.commit()
+        return cursor.rowcount > 0

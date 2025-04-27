@@ -13,7 +13,6 @@ from job_tracker.db.repos.job_repo import JobRepo
 from job_tracker.models.application import Application
 from job_tracker.models.job import Job
 from job_tracker.models.pagination import Page
-from job_tracker.models.user import User
 
 
 class ApplicationService:
@@ -39,14 +38,13 @@ class ApplicationService:
         *,
         page: int = 1,
         per_page: int | None = None,
-        user_id: str,
         status: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None,
     ) -> Page[Application]:
         """Return a Page of Application models filtered / paginated."""
         per_page = per_page or self._per_page
-        filters = self._build_filters(user_id, status, job_id, company_id)
+        filters = self._build_filters(status, job_id, company_id)
 
         apps = self._applications.list(page=page, per_page=per_page, filters=filters)
         total = self._applications.count(filters)
@@ -58,11 +56,11 @@ class ApplicationService:
         """Get application by ID."""
         return self._applications.by_id(application_id)
 
-    def by_job_id(self, job_id: str, user_id: str) -> Optional[Application]:
-        """Get application for a specific job and user."""
-        return self._applications.by_job_id(job_id, user_id)
+    def by_job_id(self, job_id: str) -> Optional[Application]:
+        """Get application for a specific job."""
+        return self._applications.by_job_id(job_id)
 
-    def get_application_stats(self, user_id: str) -> Dict[str, int]:
+    def get_application_stats(self) -> Dict[str, int]:
         """Get application statistics per status."""
         stats = {
             "applied": 0,
@@ -75,10 +73,10 @@ class ApplicationService:
         
         for status in stats.keys():
             if status != "total":
-                filters = {"user_id": ObjectId(user_id), "status": status}
+                filters = {"status": status}
                 stats[status] = self._applications.count(filters)
         
-        stats["total"] = self._applications.count({"user_id": ObjectId(user_id)})
+        stats["total"] = self._applications.count({})
         return stats
 
     # --------------------------------------------------------------------- #
@@ -89,7 +87,6 @@ class ApplicationService:
         self, 
         *, 
         job_id: str, 
-        user: User, 
         application_date: datetime = None,
         notes: str = "",
         status: str = "applied"
@@ -98,7 +95,7 @@ class ApplicationService:
         Create a new job application.
         """
         # Check if application for this job already exists
-        existing = self.by_job_id(job_id, user.id)
+        existing = self.by_job_id(job_id)
         if existing:
             return existing
             
@@ -114,8 +111,7 @@ class ApplicationService:
             
         # Create application
         application = Application(
-            id="",  # let Mongo assign
-            user_id=user.id,
+            id="",  # let SQLite assign
             job_id=job_id,
             company_id=job.company_id,
             application_date=application_date,
@@ -157,21 +153,20 @@ class ApplicationService:
 
     @staticmethod
     def _build_filters(
-        user_id: str, 
         status: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None
     ) -> dict:
-        """Build MongoDB filters."""
-        filters = {"user_id": ObjectId(user_id)}
+        """Build filters for SQLite queries."""
+        filters = {}
         
         if status:
             filters["status"] = status
             
         if job_id:
-            filters["job_id"] = ObjectId(job_id)
+            filters["job_id"] = job_id
             
         if company_id:
-            filters["company_id"] = ObjectId(company_id)
+            filters["company_id"] = company_id
             
         return filters

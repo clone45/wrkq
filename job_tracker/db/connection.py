@@ -1,35 +1,46 @@
 # job_tracker/db/connection.py
 
 """
-MongoDB connection handler
+SQLite connection handler
 """
 
-from pymongo import MongoClient
+import sqlite3
+from pathlib import Path
+from typing import Dict, Any
 
 
-class MongoDBConnection:
+class SQLiteConnection:
     """
-    Handles basic connection to MongoDB
+    Handles basic connection to SQLite
     """
     
     def __init__(self, config):
         """
-        Initialize MongoDB connection
+        Initialize SQLite connection
         
         Args:
-            config: Configuration dictionary containing MongoDB settings
+            config: Configuration dictionary containing SQLite settings
         """
-        self.client = MongoClient(config["mongodb"]["uri"])
-        self.db = self.client.get_database(config["mongodb"]["database"])
+        db_path = Path(config["sqlite"]["db_path"])
+        self.conn = sqlite3.connect(db_path)
+        # Enable foreign keys
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        # Return rows as dictionaries
+        self.conn.row_factory = sqlite3.Row
         
-    def col(self, name: str):
+    def cursor(self):
         """
-        Get a collection by name
+        Get a cursor for database operations
         
-        Args:
-            name: Collection name
-            
         Returns:
-            MongoDB collection
+            SQLite cursor
         """
-        return self.db[name]
+        return self.conn.cursor()
+    
+    def commit(self):
+        """Commit the current transaction"""
+        self.conn.commit()
+        
+    def close(self):
+        """Close the connection"""
+        self.conn.close()
