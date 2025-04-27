@@ -2,6 +2,9 @@ my_log.txt
 job_tracker.log
 *.log
 
+db/data
+db/data/sqlite.db
+
 # Python bytecode files
 **/__pycache__/
 __pycache__/

@@ -14,7 +14,9 @@ from job_tracker.db.connection import MongoDBConnection
 from job_tracker.db.repos.company_repo import CompanyRepo
 from job_tracker.db.repos.job_repo import JobRepo
 from job_tracker.db.repos.user_repo import UserRepo
+from job_tracker.db.repos.application_repo import ApplicationRepo
 from job_tracker.services.job_service import JobService
+from job_tracker.services.application_service import ApplicationService
 
 
 class Container:
@@ -26,7 +28,9 @@ class Container:
         self._job_repo: JobRepo | None = None
         self._company_repo: CompanyRepo | None = None
         self._user_repo: UserRepo | None = None
+        self._application_repo: ApplicationRepo | None = None
         self._job_service: JobService | None = None
+        self._application_service: ApplicationService | None = None
 
     # ---------- infra ----------
     @property
@@ -54,6 +58,12 @@ class Container:
             self._user_repo = UserRepo(self.mongo)
         return self._user_repo
 
+    @property
+    def application_repo(self) -> ApplicationRepo:
+        if self._application_repo is None:
+            self._application_repo = ApplicationRepo(self.mongo)
+        return self._application_repo
+
     # ---------- services ----------
     @property
     def job_service(self) -> JobService:
@@ -64,6 +74,16 @@ class Container:
                 default_page_size=self._cfg.get("ui", {}).get("per_page", 15),
             )
         return self._job_service
+        
+    @property
+    def application_service(self) -> ApplicationService:
+        if self._application_service is None:
+            self._application_service = ApplicationService(
+                self.application_repo,
+                self.job_repo,
+                default_page_size=self._cfg.get("ui", {}).get("per_page", 15),
+            )
+        return self._application_service
 
 
 # convenience factory

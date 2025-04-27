@@ -12,7 +12,8 @@ DEFAULT_CONFIG = {
         "uri": "mongodb://localhost:27017/",
         "database": "jobs_database",
         "jobs_collection": "jobs",
-        "companies_collection": "companies"
+        "companies_collection": "companies",
+        "applications_collection": "applications"
     },
     "ui": {
         "per_page": 15,
