@@ -1,2 +1,3 @@
 my_log.txt
 job_tracker.log
+*.log
