@@ -4,6 +4,7 @@ job_tracker.log
 
 db/data
 db/data/sqlite.db
+job_tracker/db/data/sqlite.db
 
 # Python bytecode files
 **/__pycache__/
