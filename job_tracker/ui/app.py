@@ -5,6 +5,7 @@ Main Textual application class for the Job Tracker
 from __future__ import annotations
 
 from typing import Dict, Any, Optional
+from simple_logger import Slogger
 
 from bson import ObjectId
 from textual import log
@@ -26,7 +27,8 @@ class JobTrackerApp(App):
 
     CSS_PATH = [
         "css/main.tcss",
-        "css/detail_chat.tcss"
+        "css/detail_chat.tcss",
+        "css/add_job_screen.tcss"
     ]
 
     BINDINGS = [
@@ -103,23 +105,18 @@ class JobTrackerApp(App):
             self.notify("Cannot add job: user not loaded.", severity="error", timeout=4)
             return
 
-        log("Opening AddJobScreen")
+        Slogger.log("Opening AddJobScreen")
 
-        def reload_callback(added_job):
+        def on_job_added(added_job):
             if added_job:
-                try:
-                    jobs_screen = self.query_one("#jobs_screen", JobsScreen)
-                    jobs_screen.load_jobs()
-                except Exception as e:
-                    log.error(f"Could not refresh JobsScreen: {e}")
+                self.refresh_jobs_list()
 
         self.push_screen(
             AddJobScreen(
                 job_repo=self.container.job_repo,
                 company_repo=self.container.company_repo,
-                user_id=self.current_user_id,
-            ),
-            reload_callback,
+                user_id=str(self.current_user_id)
+            )
         )
 
     # ------------------------------------------------------------------ #
@@ -137,3 +134,9 @@ class JobTrackerApp(App):
             log(f"Authenticated as {user_doc.email}")
         else:
             log.error("User not found or _id invalid")
+
+    def refresh_jobs_list(self) -> None:
+        """Refresh the jobs list in the main screen."""
+        jobs_screen = self.query_one("#jobs_screen", JobsScreen)
+        jobs_screen.load_jobs()
+        pass

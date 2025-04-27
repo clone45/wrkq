@@ -154,6 +154,7 @@ class JobsScreen(Screen):
     # Action handlers
     # ------------------------------------------------------------------ #
 
+
     def action_focus_search(self) -> None:
         self.query_one(SearchBar).focus_input()
 
@@ -177,6 +178,10 @@ class JobsScreen(Screen):
     # ------------------------------------------------------------------ #
     # Event handlers
     # ------------------------------------------------------------------ #
+
+    def on_screen_resume(self, event) -> None:
+        self.load_jobs()
+
 
     def on_job_table_row_selected(self, event: JobTable.RowSelected) -> None:
         row_index = event.row_key.value
@@ -205,6 +210,7 @@ class JobsScreen(Screen):
             or self.job_service.by_id(job_id)
 
     def load_jobs(self) -> None:
+
         """Fetch jobs from service and refresh UI widgets."""
         page_obj: Page[Job] = self.job_service.page(
             page=self.current_page,

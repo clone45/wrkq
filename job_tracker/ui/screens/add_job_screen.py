@@ -1,171 +1,314 @@
-# job_tracker/ui/screens/add_job_screen.py
+"""
+Screen for adding a new job application to the system.
+"""
 
-from typing import Dict, Any, Optional
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any, Callable, Dict, Optional, List
 
 from textual.app import ComposeResult
-from textual.screen import ModalScreen
-from textual.containers import VerticalScroll, Container, Vertical
-from textual.widgets import (
-    Label,
-    Input,
-    Button,
-    Static,
-    TextArea,
-    Switch # Consider for 'Hidden' flag? Maybe later.
-)
-from textual import events
-from textual import log # For debugging
+from textual.containers import Container, Grid, Horizontal, VerticalScroll
+from textual.screen import Screen
+from textual.widgets import Button, Header, Footer, Input, Label, TextArea, Static, Select
+from textual import log
 
-from job_tracker.db.connection import MongoDBConnection
-from bson import ObjectId # Import ObjectId
+from job_tracker.db.repos.job_repo import JobRepo
+from job_tracker.db.repos.company_repo import CompanyRepo
+from job_tracker.models.job import Job
+from simple_logger import Slogger
 
-class AddJobScreen(ModalScreen[Optional[Dict[str, Any]]]): # Return the added job dict or None
-    """Modal screen for adding a new job."""
+class AddJobScreen(Screen):
+    """Full-screen interface for adding a new job application."""
 
-    CSS_PATH = "../css/add_job_screen.tcss"
+    BINDINGS = [
+        ("escape", "go_back", "Back to Jobs"),
+        ("ctrl+s", "submit", "Save Job"),
+        ("f1", "toggle_help", "Toggle Help"),
+    ]
 
     def __init__(
         self,
-        mongodb: MongoDBConnection,
-        user_id: ObjectId, # Pass the current user's ID
+        job_repo: JobRepo,
+        company_repo: CompanyRepo,
+        user_id: str,
+        *,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
     ):
+        """
+        Initialize the AddJobScreen with required dependencies.
+        
+        Args:
+            job_repo: Repository for job operations
+            company_repo: Repository for company operations
+            user_id: ID of the current user
+        """
         super().__init__(name=name, id=id, classes=classes)
-        self.mongodb = mongodb
+        self.job_repo = job_repo
+        self.company_repo = company_repo
         self.user_id = user_id
-        if not user_id:
-             # This should not happen if called correctly from app
-             log.error("AddJobScreen initialized without a user_id!")
-
+        self.show_help = False
+        
+        # Common sources for job listings
+        self.sources = [
+            "LinkedIn",
+            "Indeed",
+            "Company Website",
+            "Glassdoor",
+            "ZipRecruiter",
+            "Referral",
+            "Job Fair",
+            "Other"
+        ]
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="add-job-dialog"):
-            yield Label("Add New Job Application", id="add-job-title")
-            with VerticalScroll(id="add-job-form"):
-                yield Label("Company Name *")
-                yield Input(placeholder="e.g., Acme Corp", id="add-job-company")
-
-                yield Label("Job Title *")
-                yield Input(placeholder="e.g., Software Engineer", id="add-job-title-input") # Renamed ID
-
-                yield Label("Location")
-                yield Input(placeholder="e.g., San Francisco, CA or Remote", id="add-job-location")
-
-                yield Label("Salary")
-                yield Input(placeholder="e.g., $100k-$120k or $50/hr", id="add-job-salary")
-
-                yield Label("Job Posting Link")
-                yield Input(placeholder="https://...", id="add-job-link")
-
-                yield Label("Source")
-                yield Input(placeholder="e.g., LinkedIn, Indeed, Company Website", id="add-job-source")
-
-                yield Label("Posting Date (YYYY-MM-DD)")
-                yield Input(placeholder=datetime.now().strftime('%Y-%m-%d'), id="add-job-date", value=datetime.now().strftime('%Y-%m-%d'))
-
-                yield Label("Notes / Description Snippet")
-                yield TextArea(language="markdown", id="add-job-notes", classes="add-job-notes-area")
-
-            with Container(id="add-job-buttons"):
-                yield Button("Save Job", variant="success", id="add-job-save")
-                yield Button("Cancel", variant="error", id="add-job-cancel")
-
+        """Compose the screen widgets."""
+        # Header with title
+        yield Header(show_clock=True)
+        
+        # Main content container
+        with Container(id="add-job-container"):
+            # Title section
+            with Container(id="add-job-title-section"):
+                yield Label("Add New Job Application", id="page-title", classes="heading")
+                yield Label("Enter the details of the job you're applying for", classes="subheading")
+            
+            # Main form content in two columns
+            with Grid(id="form-grid"):
+                # Left column - core job details
+                with Container(id="left-column", classes="form-column"):
+                    yield Label("Job Details", classes="section-title")
+                    
+                    # Company info
+                    yield Label("Company Name *", classes="input-label")
+                    yield Input(placeholder="e.g., Acme Corporation", id="company-name")
+                    
+                    # Job title
+                    yield Label("Job Title *", classes="input-label")
+                    yield Input(placeholder="e.g., Software Engineer", id="job-title")
+                    
+                    # Location
+                    yield Label("Location", classes="input-label")
+                    yield Input(placeholder="e.g., San Francisco, CA or Remote", id="job-location")
+                    
+                    # Salary
+                    yield Label("Salary", classes="input-label")
+                    yield Input(placeholder="e.g., $100,000 - $120,000 or $50/hr", id="job-salary")
+                    
+                    # Source dropdown
+                    yield Label("Source", classes="input-label")
+                    yield Select(
+                        ((source, source) for source in self.sources),
+                        id="job-source",
+                        prompt="Select or type a source"
+                    )
+                    
+                    # Job URL/Link
+                    yield Label("Job Posting URL", classes="input-label")
+                    yield Input(placeholder="https://...", id="job-url")
+                
+                # Right column - dates, description, notes
+                with Container(id="right-column", classes="form-column"):
+                    yield Label("Additional Information", classes="section-title")
+                    
+                    # Posting date
+                    yield Label("Posting Date", classes="input-label")
+                    yield Input(
+                        placeholder=datetime.now().strftime('%Y-%m-%d'), 
+                        id="posting-date", 
+                        value=datetime.now().strftime('%Y-%m-%d')
+                    )
+                    
+                    # Job description
+                    yield Label("Job Description", classes="input-label")
+                    # Removed placeholder parameter which isn't supported
+                    yield TextArea(
+                        id="job-description",
+                        classes="description-area"
+                    )
+                
+            # Help panel (hidden by default)
+            yield Static("", id="help-panel")
+            
+            # Action buttons
+            with Horizontal(id="action-buttons"):
+                yield Button("Cancel", variant="primary", id="cancel-button")
+                yield Button("Save Job", variant="success", id="save-button")
+        
+        # Footer with key bindings
+        yield Footer()
+    
+    def on_mount(self) -> None:
+        """Initialize the screen when mounted."""
+        # Focus the first input field
+        self.query_one("#company-name").focus()
+        
+        # Set up the help panel content but hide it initially
+        help_panel = self.query_one("#help-panel", Static)
+        help_panel.update(self._get_help_text())
+        help_panel.display = False
+        
+        # Add a placeholder instruction to the job description field
+        description_area = self.query_one("#job-description", TextArea)
+        description_area.text = "Paste the job description here..."
+    
+    def _get_help_text(self) -> str:
+        """Generate the help text content."""
+        return """
+        # Adding a New Job Application
+        
+        Fill in the form with details about the job you're applying for.
+        
+        ## Required Fields
+        - Company Name: The name of the company offering the position
+        - Job Title: The title or role you're applying for
+        
+        ## Tips
+        - For remote positions, you can specify "Remote" or "Remote - US" etc.
+        - Include salary information when available for future reference
+        - Paste the full job description to keep all details for reference
+        
+        Press Escape to cancel or Ctrl+S to save the job.
+        """
+    
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button clicks."""
-        if event.button.id == "add-job-save":
+        """Handle button press events."""
+        button_id = event.button.id
+        
+        if button_id == "cancel-button":
+            self.action_go_back()
+        elif button_id == "save-button":
             self.action_submit()
-        elif event.button.id == "add-job-cancel":
-            self.app.pop_screen() # Simple dismiss for cancel
-
+    
+    def action_go_back(self) -> None:
+        """Return to the jobs screen."""
+        self.app.pop_screen()
+    
+    def action_toggle_help(self) -> None:
+        """Toggle the visibility of the help panel."""
+        help_panel = self.query_one("#help-panel")
+        self.show_help = not self.show_help
+        help_panel.display = self.show_help
+    
     def action_submit(self) -> None:
-        """Process and save the job."""
-        log("Submit action triggered") # Debug log
-
-        # --- Get Data from Inputs ---
-        company_input = self.query_one("#add-job-company", Input)
-        title_input = self.query_one("#add-job-title-input", Input)
-        location_input = self.query_one("#add-job-location", Input)
-        salary_input = self.query_one("#add-job-salary", Input)
-        link_input = self.query_one("#add-job-link", Input)
-        source_input = self.query_one("#add-job-source", Input)
-        date_input = self.query_one("#add-job-date", Input)
-        notes_area = self.query_one("#add-job-notes", TextArea)
-
-        company_name = company_input.value.strip()
-        job_title = title_input.value.strip()
-
-        # --- Basic Validation ---
-        errors = []
+        """Validate and save the job application."""
+        # Get values from form fields
+        company_name = self.query_one("#company-name", Input).value.strip()
+        job_title = self.query_one("#job-title", Input).value.strip()
+        location = self.query_one("#job-location", Input).value.strip()
+        salary = self.query_one("#job-salary", Input).value.strip()
+        source = self.query_one("#job-source", Select).value
+        job_url = self.query_one("#job-url", Input).value.strip()
+        posting_date_str = self.query_one("#posting-date", Input).value.strip()
+        job_description = self.query_one("#job-description", TextArea).text
+        
+        # Clear placeholder text if it's still there
+        if job_description == "Paste the job description here...":
+            job_description = ""
+        
+        # Validate required fields
+        errors: List[str] = []
+        
         if not company_name:
-            errors.append("Company Name is required.")
-            company_input.border_title = "REQUIRED"
-            company_input.styles.border = ("heavy", "red")
-        else:
-            company_input.border_title = None
-            company_input.styles.border = None # Reset style
-
+            errors.append("Company Name is required")
+            self._mark_field_error("#company-name")
+        
         if not job_title:
-            errors.append("Job Title is required.")
-            title_input.border_title = "REQUIRED"
-            title_input.styles.border = ("heavy", "red")
-        else:
-            title_input.border_title = None
-            title_input.styles.border = None # Reset style
-
+            errors.append("Job Title is required")
+            self._mark_field_error("#job-title")
+        
+        # Validate date format
+        posting_date = None
+        try:
+            if posting_date_str:
+                posting_date = datetime.strptime(posting_date_str, '%Y-%m-%d')
+            else:
+                posting_date = datetime.now()
+        except ValueError:
+            errors.append("Invalid date format. Use YYYY-MM-DD")
+            self._mark_field_error("#posting-date")
+        
+        # If validation failed, show error and return
         if errors:
-            self.notify(", ".join(errors), title="Validation Error", severity="error", timeout=5)
-            log.warning(f"Validation errors: {errors}") # Debug log
-            return # Stop submission
+            error_message = ", ".join(errors)
+            self.notify(error_message, title="Validation Error", severity="error")
+            return
+        
+        # Find or create company
+        try:
+            # Use the existing method with named parameters
+            company = self.company_repo.find_or_create(company_name=company_name, user_id=self.user_id)
+            company_id = str(company.id) if company else None
+            
+            if not company_id:
+                self.notify(
+                    f"Failed to create company record for '{company_name}'", 
+                    title="Database Error", 
+                    severity="error"
+                )
+                return
+                
+        except Exception as e:
+            log.error(f"Error creating company: {e}")
+            self.notify(
+                f"Failed to create company: {str(e)}", 
+                title="Database Error", 
+                severity="error"
+            )
+            return
+        
+        # Create new job object
+        new_job = Job(
+            id="",  # This will be assigned by MongoDB
+            company_id=company_id,
+            user_id=self.user_id,
+            company=company_name,
+            title=job_title,
+            location=location or "",
+            posting_date=posting_date,
+            salary=salary or None,
+            hidden=False,
+            hidden_date=None,
+            created_at=datetime.now(),
+            job_description=job_description or None,
+            # Add any other fields your Job model requires
+        )
+        
+        # Save to database
+        try:
+            saved_job = self.job_repo.add(new_job)
+            
+            if saved_job:
+                self.notify(
+                    f"Successfully added job: {job_title} at {company_name}",
+                    title="Success",
+                    severity="information"
+                )
+                
+                # Log the saved job before dismissing
+                Slogger.log(f"Dismissing screen with saved job ID: {saved_job.id}")
 
-        log("Validation passed") # Debug log
+                self.app.pop_screen()
+                
 
-        # --- Process Company ---
-        if not self.user_id:
-             self.notify("User ID is missing. Cannot save job.", title="Internal Error", severity="error")
-             log.error("Cannot save job: user_id is missing.")
-             return
+            else:
+                self.notify(
+                    "Failed to save job to database",
+                    title="Database Error", 
+                    severity="error"
+                )
 
-        log(f"Finding/creating company '{company_name}' for user '{self.user_id}'") # Debug log
-        company_id = self.mongodb.find_or_create_company(company_name, self.user_id)
-
-        if not company_id:
-            self.notify(f"Failed to find or create company '{company_name}'.", title="Database Error", severity="error")
-            log.error(f"Failed to get company_id for '{company_name}'") # Debug log
-            return # Stop submission
-
-        log(f"Obtained company_id: {company_id}") # Debug log
-
-        # --- Prepare Job Data ---
-        new_job_data = {
-            "user_id": self.user_id,
-            "company": company_name, # Store original casing for display
-            "company_id": company_id,
-            "title": job_title,
-            "location": location_input.value.strip() or None, # Use None if empty
-            "salary": salary_input.value.strip() or None,
-            "details_link": link_input.value.strip() or None,
-            "site_name": source_input.value.strip() or None,
-            "posting_date": date_input.value.strip() or datetime.now().strftime('%Y-%m-%d'),
-            "job_description": notes_area.text or None, # Get text from TextArea
-            "hidden": False, # Default
-            # "job_id": None, # Often comes from scraping, maybe generate one? Optional.
-            # "slug": None, # Can be generated later if needed
-        }
-
-        log(f"Attempting to add job: {new_job_data}") # Debug log
-
-        # --- Add Job to DB ---
-        new_job_id = self.mongodb.add_job(new_job_data)
-
-        if new_job_id:
-            self.notify("Job added successfully!", title="Success", severity="information")
-            log(f"Job added with ID: {new_job_id}") # Debug log
-            # Add the new _id to the dictionary before returning
-            new_job_data['_id'] = new_job_id
-            self.dismiss(new_job_data) # Dismiss and return the added job data
-        else:
-            self.notify("Failed to save job to database.", title="Database Error", severity="error")
-            log.error("mongodb.add_job returned None") # Debug log
+        except Exception as e:
+            Slogger.log(f"Error saving job: {repr(e)}")
+            self.notify(
+                f"Error saving job: {str(e)}",
+                title="Database Error", 
+                severity="error"
+            )
+    
+    def _mark_field_error(self, selector: str) -> None:
+        """Mark a field as having an error."""
+        widget = self.query_one(selector)
+        widget.add_class("input-error")
