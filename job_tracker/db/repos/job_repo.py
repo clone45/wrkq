@@ -82,3 +82,12 @@ class JobRepo:
         except Exception as e:
             print(f"Unexpected error while adding job: {e}")
             return None
+        
+    def delete(self, job_id: str) -> bool:
+        """Delete a job completely from the database."""
+        try:
+            result = self._col.delete_one({"_id": ObjectId(job_id)})
+            return result.deleted_count > 0
+        except Exception as e:
+            print(f"Error deleting job: {e}")
+            return False

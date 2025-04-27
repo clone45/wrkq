@@ -1,0 +1,31 @@
+/* Add to an existing CSS file or create job_actions.tcss */
+
+/* Modal Styling */
+JobActionsModal {
+    align: center middle;
+}
+
+#job-actions-container {
+    width: 60%;
+    height: auto;
+    background: $panel;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#job-actions-title {
+    text-align: center;
+    margin-bottom: 1;
+    text-style: bold;
+}
+
+#actions-list {
+    margin: 1 0;
+    min-height: 5;
+}
+
+#action-buttons {
+    margin-top: 1;
+    width: 100%;
+    align-horizontal: center;
+}

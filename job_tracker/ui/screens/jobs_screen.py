@@ -34,7 +34,7 @@ from job_tracker.ui.widgets.pagination import Pagination
 from job_tracker.ui.widgets.search_bar import SearchBar
 from job_tracker.ui.widgets.job_details import JobDetail
 from job_tracker.ui.widgets.chat_panel import ChatPanel
-
+from job_tracker.ui.widgets.confirmation_modal import ConfirmationModal
 
 class JobsScreen(Screen):
     """Main screen for job listings with integrated chat panel."""
@@ -209,6 +209,31 @@ class JobsScreen(Screen):
         return next((j for j in self.jobs_data if j.id == job_id), None) \
             or self.job_service.by_id(job_id)
 
+    def show_job_actions(self) -> None:
+        """Show a modal with actions for the selected job."""
+        from job_tracker.ui.widgets.job_actions import JobActionsModal
+        
+        if not self.selected_job_id:
+            self.notify("No job selected for actions", severity="warning", timeout=3)
+            return
+
+        job = self._get_job_data(self.selected_job_id)
+        
+        if not job:
+            self.notify("Could not find selected job", severity="error", timeout=3)
+            return
+        
+        # Open the modal with job details and hide job callback
+        self.app.push_screen(
+            JobActionsModal(
+                job_title=job.title,
+                company_name=job.company,
+                job_id=self.selected_job_id,
+                hide_callback=self._hide_job_callback,
+                delete_callback=self.delete_job,
+            )
+        )
+
     def load_jobs(self) -> None:
 
         """Fetch jobs from service and refresh UI widgets."""
@@ -272,3 +297,103 @@ class JobsScreen(Screen):
             else None
         )
         self.status_controller.update(meta, self.selected_job_id, selected)
+
+    def hide_selected_job(self) -> None:
+        """Hide the currently selected job."""
+        if not self.selected_job_id:
+            self.notify("No job selected to hide", severity="warning", timeout=3)
+            return
+
+        job = self._get_job_data(self.selected_job_id)
+        
+        if not job:
+            self.notify("Could not find selected job", severity="error", timeout=3)
+            return
+            
+        # Don't rehide already hidden jobs
+        if job.hidden:
+            self.notify(f"Job '{job.company} - {job.title}' is already hidden", 
+                    severity="warning", timeout=3)
+            return
+        
+        # Call service to hide the job
+        try:
+            # Use existing hide method from job_service
+            success = self.job_service.hide(self.selected_job_id)
+            
+            if success:
+                self.notify(f"Job '{job.company} - {job.title}' hidden successfully", 
+                        severity="information", timeout=3)
+                
+                # Refresh job list
+                self.load_jobs()
+                
+                # If showing hidden jobs, update the detail view to reflect the changes
+                if self.show_hidden and self.selected_job_id:
+                    job = self._get_job_data(self.selected_job_id)
+                    self.query_one(JobDetail).update_job(job)
+                else:
+                    # Clear selection if we're not showing hidden jobs
+                    self.selected_job_id = None
+            else:
+                self.notify("Failed to hide job", severity="error", timeout=3)
+        except Exception as e:
+            self.notify(f"Error hiding job: {str(e)}", severity="error", timeout=3)
+
+    def delete_job(self, job_id: str) -> None:
+        """Delete a job from the database."""
+        job = self._get_job_data(job_id)
+        
+        if not job:
+            self.notify("Could not find job to delete", severity="error", timeout=3)
+            return
+        
+        # Confirm with the user before deletion
+        def handle_delete_yes():
+            try:
+                # Call service to delete the job
+                success = self.job_service.delete(job_id)
+                
+                if success:
+                    self.notify(f"Job '{job.company} - {job.title}' deleted permanently", 
+                            severity="information", timeout=3)
+                    
+                    # Clear selection if this was the selected job
+                    if self.selected_job_id == job_id:
+                        self.selected_job_id = None
+                    
+                    # Refresh job list
+                    self.load_jobs()
+                else:
+                    self.notify("Failed to delete job", severity="error", timeout=3)
+            except Exception as e:
+                self.notify(f"Error deleting job: {str(e)}", severity="error", timeout=3)
+        
+        # Show confirmation dialog
+        self.app.push_screen(
+            ConfirmationModal(
+                title="Confirm Job Deletion",
+                message=f"Are you sure you want to permanently delete the job '{job.company} - {job.title}'?\n\nThis action cannot be undone.",
+                on_yes=handle_delete_yes
+            )
+        )
+
+    def _hide_job_callback(self, job_id: str) -> None:
+        """
+        Callback function for hiding a job from the actions modal.
+        This temporarily sets the selected job ID and then calls the hide method.
+        """
+        # Save current selection
+        current_selection = self.selected_job_id
+        
+        # Set selection to the job we want to hide
+        self.selected_job_id = job_id
+        
+        # Use the hide method
+        self.hide_selected_job()
+        
+        # If the original selection was different and still exists, restore it
+        if current_selection != job_id and current_selection and self.show_hidden:
+            # Check if the original job still exists in the data
+            if any(job.id == current_selection for job in self.jobs_data):
+                self.selected_job_id = current_selection

@@ -85,6 +85,10 @@ class JobService:
             )
         return stored
 
+    def delete(self, job_id: str) -> bool:
+        """Delete a job completely from the database."""
+        return self._jobs.delete(job_id)
+
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #

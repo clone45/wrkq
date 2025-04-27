@@ -28,17 +28,18 @@ class JobTrackerApp(App):
     CSS_PATH = [
         "css/main.tcss",
         "css/detail_chat.tcss",
-        "css/add_job_screen.tcss"
+        "css/add_job_screen.tcss",
+        "css/job_actions.tcss",
+        "css/confirmation_modal.tcss",
     ]
 
     BINDINGS = [
         Binding("q", "quit", "Quit", show=True),
         Binding("a", "add_job", "Add Job", show=True),
-        Binding("n", "next_page", "Next Page", show=True),
-        Binding("p", "prev_page", "Previous Page", show=True),
         Binding("h", "toggle_hidden", "Toggle Hidden Jobs", show=True),
         Binding("f", "focus_search", "Search", show=True),
-        Binding("d", "toggle_detail", "Toggle Details", show=True),
+        Binding("delete", "hide_selected_job", "Hide Job", show=True),
+        Binding("space", "show_job_actions", "Job Actions", show=True),
     ]
 
     # ------------------------------------------------------------------ #
@@ -77,6 +78,11 @@ class JobTrackerApp(App):
     # ------------------------------------------------------------------ #
     # key-binding actions
     # ------------------------------------------------------------------ #
+
+    def action_show_job_actions(self) -> None:
+        """Show job actions modal for the selected job."""
+        if hasattr(self.screen, "show_job_actions"):
+            self.screen.show_job_actions()
 
     def action_focus_search(self) -> None:
         if hasattr(self.screen, "focus_search"):
@@ -118,6 +124,11 @@ class JobTrackerApp(App):
                 user_id=str(self.current_user_id)
             )
         )
+
+    def action_hide_selected_job(self) -> None:
+        """Hide the selected job."""
+        if hasattr(self.screen, "hide_selected_job"):
+            self.screen.hide_selected_job()
 
     # ------------------------------------------------------------------ #
     # helpers

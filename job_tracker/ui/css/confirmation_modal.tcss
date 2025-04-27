@@ -1,0 +1,30 @@
+/* Confirmation Dialog styling */
+ConfirmationModal {
+    align: center middle;
+}
+
+#confirmation-container {
+    width: 50%;
+    height: auto;
+    background: $panel;
+    border: solid $error;
+    padding: 1 2;
+}
+
+#confirmation-title {
+    text-align: center;
+    margin-bottom: 1;
+    text-style: bold;
+    color: $error;
+}
+
+#confirmation-message {
+    margin: 1 0;
+    min-height: 3;
+}
+
+#confirmation-buttons {
+    margin-top: 1;
+    width: 100%;
+    align-horizontal: right;
+}

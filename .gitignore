@@ -1,3 +1,28 @@
 my_log.txt
 job_tracker.log
 *.log
+
+# Python bytecode files
+**/__pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Local development settings
+.env
+.vscode/
+.idea/
+
+# Testing
+.coverage
+htmlcov/
