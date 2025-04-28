@@ -1,6 +1,7 @@
 # What is a Battle Plan?
 
 **Date:** April 27, 2025
+**Author:** Bret Truchan (human)
 
 ## Overview
 
@@ -9,7 +10,7 @@ battle plan to /docs/battle_plans/{give_it_a_name}.md
 
 It's important to note that although I specify categories below, I leave it up to you to decide what to include.  If,
 for example, there are minimal Potential Challenges and Solutions, just note that you don't forsee any issues.  Also
-notices that I've left out testing.  For now, I'll test the features myself once they have been implemented.
+notices that I've left out testing.  For now, I'll (Bret) test the features myself once they have been implemented.
 
 ## Purpose
 
