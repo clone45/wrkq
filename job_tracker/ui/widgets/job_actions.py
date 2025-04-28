@@ -26,6 +26,7 @@ class JobActionsModal(ModalScreen):
         job_id: str,
         hide_callback: Callable[[str], None],
         delete_callback: Callable[[str], None],
+        mark_applied_callback: Callable[[str], None],
         *,
         id: str | None = None,
         name: str | None = None,
@@ -40,6 +41,7 @@ class JobActionsModal(ModalScreen):
             job_id: ID of the selected job
             hide_callback: Callback function to hide a job
             delete_callback: Callback function to delete a job
+            mark_applied_callback: Callback function to mark a job as applied
         """
         super().__init__(id=id, name=name, classes=classes)
         self.job_title = job_title
@@ -47,6 +49,7 @@ class JobActionsModal(ModalScreen):
         self.job_id = job_id
         self.hide_callback = hide_callback
         self.delete_callback = delete_callback
+        self.mark_applied_callback = mark_applied_callback
 
     def compose(self) -> ComposeResult:
         """Compose the modal content."""
@@ -60,8 +63,9 @@ class JobActionsModal(ModalScreen):
             
             # Actions list
             with Vertical(id="actions-list"):
+                yield Button("Mark Applied", variant="success", id="mark-applied-button")
                 yield Button("Hide Job", variant="warning", id="hide-job-button")
-                yield Button("Delete Job", variant="error", id="delete-job-button")  # Add delete button
+                yield Button("Delete Job", variant="error", id="delete-job-button")
             
             # Close button
             with Container(id="action-buttons"):
@@ -75,6 +79,11 @@ class JobActionsModal(ModalScreen):
         button_id = event.button.id
         
         if button_id == "close-button":
+            self.dismiss()
+        elif button_id == "mark-applied-button":
+            # Call the mark applied callback
+            self.mark_applied_callback(self.job_id)
+            # Close the modal after action
             self.dismiss()
         elif button_id == "hide-job-button":
             # Call the hide job callback

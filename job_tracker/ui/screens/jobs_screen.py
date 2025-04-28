@@ -19,6 +19,7 @@ from job_tracker.db.repos.company_repo import CompanyRepo
 
 # Business layer
 from job_tracker.services.job_service import JobService
+from job_tracker.services.application_service import ApplicationService
 
 # Domain models
 from job_tracker.models.pagination import Page
@@ -56,6 +57,7 @@ class JobsScreen(Screen):
         job_repo: JobRepo,
         company_repo: CompanyRepo,
         config: Dict[str, Any],
+        application_service: Optional[ApplicationService] = None,
         *,
         id: str = "jobs_screen",
     ) -> None:
@@ -64,12 +66,13 @@ class JobsScreen(Screen):
         self.config = config
         self.per_page = config.get("ui", {}).get("per_page", 15)
 
-        # business service
+        # business services
         self.job_service = JobService(
             job_repo,
             company_repo,
             default_page_size=self.per_page,
         )
+        self.application_service = application_service
 
         # in-memory cache of current table rows
         self.jobs_data: List[Job] = []
@@ -99,7 +102,6 @@ class JobsScreen(Screen):
         # table setup
         table = self.query_one(JobTable)
         table.add_columns(
-            "ID",
             "Company",
             "Title",
             "Location",
@@ -223,7 +225,7 @@ class JobsScreen(Screen):
             self.notify("Could not find selected job", severity="error", timeout=3)
             return
         
-        # Open the modal with job details and hide job callback
+        # Open the modal with job details and callbacks
         self.app.push_screen(
             JobActionsModal(
                 job_title=job.title,
@@ -231,6 +233,7 @@ class JobsScreen(Screen):
                 job_id=self.selected_job_id,
                 hide_callback=self._hide_job_callback,
                 delete_callback=self.delete_job,
+                mark_applied_callback=self._mark_applied_callback,
             )
         )
 
@@ -257,7 +260,6 @@ class JobsScreen(Screen):
             job_id = job.id
             fmt = self.config.get("ui", {}).get("date_format", "%Y-%m-%d")
             table.add_row(
-                job_id,
                 job.company,
                 job.title,
                 job.location,
@@ -397,3 +399,62 @@ class JobsScreen(Screen):
             # Check if the original job still exists in the data
             if any(job.id == current_selection for job in self.jobs_data):
                 self.selected_job_id = current_selection
+                
+    def _mark_applied_callback(self, job_id: str) -> None:
+        """
+        Callback function for marking a job as applied from the actions modal.
+        Creates an application record and adds an entry to the history table.
+        """
+        if not self.application_service:
+            self.notify("Application service is not available", severity="error", timeout=3)
+            return
+            
+        job = self._get_job_data(job_id)
+        
+        if not job:
+            self.notify("Could not find job to mark as applied", severity="error", timeout=3)
+            return
+        
+        try:
+            # Check if an application already exists for this job
+            existing_application = self.application_service.by_job_id(job_id)
+            
+            if existing_application:
+                self.notify(f"This job was already marked as applied on {existing_application.application_date.strftime('%Y-%m-%d')}", 
+                        severity="warning", timeout=3)
+                return
+                
+            # Create a new application record
+            application = self.application_service.add(job_id=job_id)
+            
+            if application:
+                # Add entry to history table (using SQL directly since there's no specific repo)
+                conn = self.job_service._jobs._db
+                cursor = conn.cursor()
+                
+                try:
+                    cursor.execute(
+                        "INSERT INTO history (company_id, action, application_id, job_id, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            job.company_id,
+                            "applied",
+                            application.id,
+                            job_id,
+                            application.application_date.isoformat()
+                        )
+                    )
+                    conn.commit()
+                except Exception as e:
+                    print(f"Error adding history entry: {e}")
+                    # Continue even if history entry fails, as the application was created successfully
+                
+                self.notify(f"Job '{job.company} - {job.title}' marked as applied successfully", 
+                        severity="information", timeout=3)
+                
+                # Update chat panel with the new status
+                chat_panel = self.query_one("#chat-panel")
+                chat_panel.add_assistant_message(f"Job marked as applied: {job.company} - {job.title}")
+            else:
+                self.notify("Failed to mark job as applied", severity="error", timeout=3)
+        except Exception as e:
+            self.notify(f"Error marking job as applied: {str(e)}", severity="error", timeout=3)

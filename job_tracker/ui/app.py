@@ -57,6 +57,7 @@ class JobTrackerApp(App):
                 job_repo=self.container.job_repo,
                 company_repo=self.container.company_repo,
                 config=self.config,
+                application_service=self.container.application_service,
                 id="jobs_screen",
             )
         )
