@@ -11,6 +11,11 @@ DEFAULT_CONFIG = {
     "sqlite": {
         "db_path": "job_tracker/db/data/sqlite.db",
     },
+    "fetch_tool": {
+        "path": "tools/fetch/main.py",
+        "cookie_file": "private/www.linkedin.com_cookies.json",
+        "output_dir": "tools/fetch/fetched_pages"
+    },
     "ui": {
         "per_page": 15,
         "theme": "dark",

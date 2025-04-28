@@ -1,0 +1,38 @@
+/* 
+   Styling for the loading indicator overlay
+   Path: job_tracker/ui/css/loading_indicator.tcss
+*/
+
+LoadingOverlay {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+    background: $surface-darken-1 80%;
+}
+
+#loading-container {
+    width: 40;
+    height: 8;
+    background: $surface;
+    border: tall $accent;
+    border-title-align: center;
+    align: center middle;
+    layout: grid;
+    grid-size: 1;
+    grid-rows: 4 1fr;
+    padding: 1;
+}
+
+LoadingIndicator {
+    width: 100%;
+    height: 1;
+    align: center middle;
+}
+
+#loading-message {
+    width: 100%;
+    height: auto;
+    content-align: center middle;
+    text-style: bold;
+    color: $text;
+}

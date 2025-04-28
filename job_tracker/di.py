@@ -13,6 +13,9 @@ from job_tracker.db.repos.job_repo import JobRepo
 from job_tracker.db.repos.application_repo import ApplicationRepo
 from job_tracker.services.job_service import JobService
 from job_tracker.services.application_service import ApplicationService
+from job_tracker.services.openai_service import OpenAIService
+from job_tracker.services.fetch_bridge_service import FetchBridgeService
+from job_tracker.services.job_extractor_service import JobExtractorService
 
 
 class Container:
@@ -26,6 +29,9 @@ class Container:
         self._application_repo: ApplicationRepo | None = None
         self._job_service: JobService | None = None
         self._application_service: ApplicationService | None = None
+        self._openai_service: OpenAIService | None = None
+        self._fetch_bridge_service: FetchBridgeService | None = None
+        self._job_extractor_service: JobExtractorService | None = None
 
     # ---------- infra ----------
     @property
@@ -73,6 +79,26 @@ class Container:
                 default_page_size=self._cfg.get("ui", {}).get("per_page", 15),
             )
         return self._application_service
+        
+    @property
+    def openai_service(self) -> OpenAIService:
+        if self._openai_service is None:
+            self._openai_service = OpenAIService()
+        return self._openai_service
+        
+    @property
+    def fetch_bridge_service(self) -> FetchBridgeService:
+        if self._fetch_bridge_service is None:
+            self._fetch_bridge_service = FetchBridgeService(self._cfg)
+        return self._fetch_bridge_service
+    
+    @property
+    def job_extractor_service(self) -> JobExtractorService:
+        if self._job_extractor_service is None:
+            self._job_extractor_service = JobExtractorService(
+                self.fetch_bridge_service
+            )
+        return self._job_extractor_service
 
 
 # convenience factory

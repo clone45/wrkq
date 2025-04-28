@@ -1,6 +1,8 @@
-my_log.txt
-job_tracker.log
-*.log
+logs/
+private/
+
+tools/fetch/fetched_pages
+CLAUDE.md
 
 job_tracker/db/data/sqlite.db
 

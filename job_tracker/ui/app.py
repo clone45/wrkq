@@ -27,6 +27,7 @@ class JobTrackerApp(App):
         "css/add_job_screen.tcss",
         "css/job_actions.tcss",
         "css/confirmation_modal.tcss",
+        "css/loading_indicator.tcss",
     ]
 
     BINDINGS = [
@@ -94,14 +95,12 @@ class JobTrackerApp(App):
     def action_add_job(self) -> None:
         Slogger.log("Opening AddJobScreen")
 
-        def on_job_added(added_job):
-            if added_job:
-                self.refresh_jobs_list()
-
         self.push_screen(
             AddJobScreen(
                 job_repo=self.container.job_repo,
-                company_repo=self.container.company_repo
+                company_repo=self.container.company_repo,
+                job_extractor_service=self.container.job_extractor_service,
+                openai_service=self.container.openai_service  # Keep for backward compatibility
             )
         )
 

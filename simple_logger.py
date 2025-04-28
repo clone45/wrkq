@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 class Slogger:
-    log_path = "my_log.txt"
+    log_path = "logs/wrkq.log"
 
     @classmethod
     def log(cls, message: str):

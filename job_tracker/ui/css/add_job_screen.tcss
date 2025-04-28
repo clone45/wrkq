@@ -9,6 +9,7 @@
     width: 100%;
     background: $surface;
     padding: 1 2;
+    overflow-y: auto;
 }
 
 /* Title section styling */
@@ -35,6 +36,33 @@
 .subheading {
     color: $text-muted;
     margin-bottom: 1;
+}
+
+/* URL input container at the top */
+#url-input-container {
+    width: 100%;
+    margin-bottom: 2;
+    height: 8;
+    border: orange;
+}
+
+#url-input-row {
+    width: 100%;
+    align: center middle;
+}
+
+#url-input-row Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+#import-button {
+    min-width: 10;
+    background: $accent;
+}
+
+#import-button:hover {
+    background: $accent-darken-1;
 }
 
 /* Two-column form layout */
