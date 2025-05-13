@@ -1,6 +1,6 @@
 logs/
 private/
-
+tools/search/search_results
 tools/fetch/fetched_pages
 CLAUDE.md
 
