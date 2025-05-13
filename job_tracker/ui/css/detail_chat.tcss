@@ -1,8 +1,9 @@
-/* Grid layout for the combined detail and chat view */
+/* Grid layout for the detail view (chat panel temporarily removed) */
 #detail-chat-grid {
     layout: grid;
-    grid-size: 2;
-    grid-columns: 2fr 1fr;
+    grid-size: 1;  /* Modified from 2 to 1 while chat panel is removed */
+    /* Original grid-size: 2; */
+    /* Original grid-columns: 2fr 1fr; */
     grid-gutter: 1 1;
     height: 1fr;  /* Changed from 40vh to 1fr to take remaining space */
     min-height: 30vh;  /* Ensure minimum reasonable height */
@@ -19,7 +20,9 @@ JobDetail {
     margin-top: 1;
     margin-bottom: 1;
     margin-right: 1;
+    margin-left: 1;  /* Added left margin for better spacing when full width */
     padding: 1;
+    width: 100%;  /* Take full width in the grid */
 }
 
 #job-detail-scroll {

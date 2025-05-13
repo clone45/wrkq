@@ -43,7 +43,6 @@
     width: 100%;
     margin-bottom: 2;
     height: 8;
-    border: orange;
 }
 
 #url-input-row {
@@ -161,16 +160,6 @@ Button {
     overflow-y: auto;
 }
 
-/* Select dropdown styling */
-Select {
-    width: 100%;
-    margin-bottom: 1;
-}
-
-/* Option focus in the dropdown */
-Select > .option-list > .option--highlight {
-    background: $accent;
-}
 
 /* Alternative responsive approach for Textual */
 /* For smaller terminals, you can use JavaScript to adjust the layout */

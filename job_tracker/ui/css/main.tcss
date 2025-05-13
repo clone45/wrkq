@@ -2,6 +2,29 @@
 Screen {
     background: $surface;
     color: $text;
+    layers: base overlay;
+}
+
+Input {
+    background: #444;
+    color: white;
+    margin-left: 0;
+    border-left: none;
+}
+
+Select > SelectCurrent,
+Select:focus > SelectCurrent {
+    background: #444;
+    color: white;
+    margin-left: 0;
+    border-left: none;
+}
+
+TextArea {
+    background: #444;
+    color: white;
+    margin-left: 0;
+    border-left: none;
 }
 
 /* Jobs screen */

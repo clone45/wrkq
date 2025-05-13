@@ -28,6 +28,7 @@ from job_tracker.models.job import Job
 # UI helpers
 from job_tracker.ui.controllers.status_bar import StatusBarController
 from job_tracker.utils.formatters import format_date
+from simple_logger import Slogger, LogLevel
 
 # Widgets
 from job_tracker.ui.widgets.job_table import JobTable
@@ -90,10 +91,11 @@ class JobsScreen(Screen):
                 yield JobTable(id="jobs-table")
                 yield Pagination(id="pagination")
                 
-                # Always visible detail and chat section
+                # Detail section (chat panel temporarily removed)
                 with Grid(id="detail-chat-grid"):
                     yield JobDetail(id="job-detail")
-                    yield ChatPanel(id="chat-panel")
+                    # Chat panel removed but code preserved for future reintegration
+                    # yield ChatPanel(id="chat-panel")
 
         yield Static(id="status-bar")
         yield Footer()
@@ -102,22 +104,27 @@ class JobsScreen(Screen):
         # table setup
         table = self.query_one(JobTable)
         table.add_columns(
+            "",
             "Company",
             "Title",
             "Location",
             "Date Posted",
             "Salary",
+            "Status",
             "Hidden",
         )
+        # Set a smaller fixed width for the Applied column since it only contains a checkmark
+        # table.columns[0].width = 8
         table.styles.height = "1fr"
 
         # Initialize the job detail with null (shows "No Job Selected")
         detail_widget = self.query_one(JobDetail)
         detail_widget.update_job(None)
 
-        # Initialize the chat panel
-        chat_panel = self.query_one(ChatPanel)
-        chat_panel.add_assistant_message("Welcome to Job Tracker! Select a job to view details.")
+        # Chat panel initialization code preserved but disabled
+        # since the panel is not currently in the UI
+        # chat_panel = self.query_one(ChatPanel)
+        # chat_panel.add_assistant_message("Welcome to Job Tracker! Select a job to view details.")
 
         # status-bar controller
         self.status_controller = StatusBarController(self.query_one("#status-bar"))
@@ -137,10 +144,12 @@ class JobsScreen(Screen):
 
             detail_widget.update_job(job)
             
+            # Chat panel update code preserved but disabled
+            # since the panel is not currently in the UI
             # Inform the chat panel about the selected job
-            chat_panel = self.query_one(ChatPanel)
-            if job:
-                chat_panel.add_assistant_message(f"Now viewing: {job.company} - {job.title}")
+            # chat_panel = self.query_one(ChatPanel)
+            # if job:
+            #     chat_panel.add_assistant_message(f"Now viewing: {job.company} - {job.title}")
         else:
             # Clear details if no job is selected
             detail_widget.update_job(None)
@@ -210,7 +219,113 @@ class JobsScreen(Screen):
     def _get_job_data(self, job_id: str) -> Optional[Job]:
         return next((j for j in self.jobs_data if j.id == job_id), None) \
             or self.job_service.by_id(job_id)
+            
+    def _create_applied_jobs_cache(self, job_ids: List[str]) -> Dict[str, bool]:
+        """
+        Create a cache of job ID to application status mappings.
+        
+        Args:
+            job_ids: List of job IDs to check
+            
+        Returns:
+            Dictionary mapping job IDs to boolean application status
+        """
+        applied_jobs = {}
+        
+        if not self.application_service:
+            # If no application service, assume all jobs are not applied
+            Slogger.warning("Application service not available, cannot check applied status", 
+                          {"screen": "JobsScreen", "method": "_create_applied_jobs_cache"})
+            return {job_id: False for job_id in job_ids}
+            
+        try:
+            # For each job ID, check if an application exists
+            applied_count = 0
+            for job_id in job_ids:
+                application = self.application_service.by_job_id(job_id)
+                is_applied = application is not None
+                applied_jobs[job_id] = is_applied
+                if is_applied:
+                    applied_count += 1
+            
+            Slogger.info(f"Found {applied_count} applied jobs out of {len(job_ids)} total jobs",
+                       {"screen": "JobsScreen", "method": "_create_applied_jobs_cache"})
+            return applied_jobs
+        except Exception as e:
+            # Log error but continue with empty cache
+            Slogger.exception(e, "Error creating applied jobs cache", 
+                            {"screen": "JobsScreen", "method": "_create_applied_jobs_cache"})
+            return {job_id: False for job_id in job_ids}
+    
+    def _check_job_applied_status(self, job_id: str, applied_cache: Optional[Dict[str, bool]] = None) -> bool:
+        """
+        Check if a job has been applied to.
+        
+        Args:
+            job_id: The ID of the job to check
+            applied_cache: Optional cache of job application status
+            
+        Returns:
+            True if the job has been applied to, False otherwise
+        """
+        # Use cache if provided
+        if applied_cache is not None and job_id in applied_cache:
+            return applied_cache[job_id]
+            
+        # Fallback to direct lookup if no cache or job not in cache
+        if not self.application_service:
+            return False
+            
+        try:
+            application = self.application_service.by_job_id(job_id)
+            return application is not None
+        except Exception:
+            # In case of any error, assume not applied
+            return False
 
+    def update_job_status(self, job_id: str, status: str) -> None:
+        """Update the status of a job."""
+        job = self._get_job_data(job_id)
+        
+        if not job:
+            self.notify("Could not find job to update status", severity="error", timeout=3)
+            return
+            
+        try:
+            # Create context for logging
+            context = {
+                "screen": "JobsScreen",
+                "method": "update_job_status",
+                "job_id": job_id,
+                "company": job.company,
+                "title": job.title,
+                "new_status": status or "None"
+            }
+            
+            # Log the attempt
+            from simple_logger import Slogger
+            Slogger.info(f"Updating status for job '{job.title}' at '{job.company}' to '{status or 'None'}'", context)
+            
+            # Call service to update status
+            success = self.job_service.update_status(job_id, status)
+            
+            if success:
+                self.notify(f"Status for '{job.company} - {job.title}' updated to '{status or 'None'}'", 
+                        severity="information", timeout=3)
+                
+                # Refresh job list
+                self.load_jobs()
+                
+                # Update the detail view to reflect the changes
+                if self.selected_job_id == job_id:
+                    updated_job = self._get_job_data(job_id)
+                    self.query_one(JobDetail).update_job(updated_job)
+            else:
+                self.notify(f"Failed to update status for '{job.company} - {job.title}'", severity="error", timeout=3)
+        except Exception as e:
+            error_type = type(e).__name__
+            self.notify(f"Error updating job status: {error_type} - {str(e)}", severity="error", timeout=5)
+    
     def show_job_actions(self) -> None:
         """Show a modal with actions for the selected job."""
         from job_tracker.ui.widgets.job_actions import JobActionsModal
@@ -234,6 +349,7 @@ class JobsScreen(Screen):
                 hide_callback=self._hide_job_callback,
                 delete_callback=self.delete_job,
                 mark_applied_callback=self._mark_applied_callback,
+                update_status_callback=self.update_job_status,
             )
         )
 
@@ -255,16 +371,27 @@ class JobsScreen(Screen):
         table = self.query_one(JobTable)
         table.clear()
 
+        # Create a cache of applied status for all jobs in the current page for better performance
+        job_ids = [job.id for job in self.jobs_data]
+        applied_jobs_cache = self._create_applied_jobs_cache(job_ids)
+        
         current_selection_key: Optional[int] = None
         for idx, job in enumerate(self.jobs_data):
             job_id = job.id
             fmt = self.config.get("ui", {}).get("date_format", "%Y-%m-%d")
+            
+            # Check if job has been applied to using the cache
+            is_applied = self._check_job_applied_status(job_id, applied_jobs_cache)
+            applied_indicator = "✓" if is_applied else ""
+            
             table.add_row(
+                applied_indicator,
                 job.company,
                 job.title,
                 job.location,
                 format_date(job.posting_date, fmt),
                 job.salary or "N/A",
+                job.status or "N/A", 
                 "Yes" if job.hidden else "No",
                 key=idx,
             )
@@ -424,8 +551,21 @@ class JobsScreen(Screen):
                         severity="warning", timeout=3)
                 return
                 
+            # Create context for logging
+            context = {
+                "screen": "JobsScreen",
+                "method": "_mark_applied_callback",
+                "job_id": job_id,
+                "company_id": job.company_id,
+                "company": job.company,
+                "title": job.title
+            }
+            
+            # Log the attempt
+            Slogger.info(f"Attempting to mark job '{job.title}' at '{job.company}' as applied", context)
+            
             # Create a new application record
-            application = self.application_service.add(job_id=job_id)
+            application = self.application_service.add(job_id=job_id, notes="Applied via job actions modal")
             
             if application:
                 # Add entry to history table (using SQL directly since there's no specific repo)
@@ -433,10 +573,35 @@ class JobsScreen(Screen):
                 cursor = conn.cursor()
                 
                 try:
+                    # First check if the history table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='history'")
+                    if not cursor.fetchone():
+                        Slogger.warning("History table does not exist, creating it", context)
+                        # Create the history table if it doesn't exist
+                        cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS history (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                company_id TEXT NOT NULL,
+                                job_id TEXT,
+                                application_id TEXT,
+                                action TEXT NOT NULL,
+                                timestamp TEXT NOT NULL
+                            )
+                        """)
+                        conn.commit()
+                    
+                    # Verify company_id is not None
+                    if not job.company_id:
+                        Slogger.warning(f"Missing company_id for job {job_id}, using placeholder", context)
+                        company_id = "unknown"
+                    else:
+                        company_id = job.company_id
+                        
+                    # Now insert the history entry
                     cursor.execute(
                         "INSERT INTO history (company_id, action, application_id, job_id, timestamp) VALUES (?, ?, ?, ?, ?)",
                         (
-                            job.company_id,
+                            company_id,
                             "applied",
                             application.id,
                             job_id,
@@ -444,17 +609,54 @@ class JobsScreen(Screen):
                         )
                     )
                     conn.commit()
+                    Slogger.info(f"Added history entry for application ID: {application.id}", context)
                 except Exception as e:
-                    print(f"Error adding history entry: {e}")
+                    error_msg = f"Error adding history entry: {str(e)}"
+                    Slogger.exception(e, error_msg, context)
                     # Continue even if history entry fails, as the application was created successfully
                 
+                Slogger.info(f"Successfully marked job '{job.title}' at '{job.company}' as applied", 
+                           {**context, "application_id": application.id})
+                           
                 self.notify(f"Job '{job.company} - {job.title}' marked as applied successfully", 
                         severity="information", timeout=3)
                 
+                # Refresh the job list to update the applied status column
+                self.load_jobs()
+                
+                # Chat panel update code preserved but disabled
+                # since the panel is not currently in the UI
                 # Update chat panel with the new status
-                chat_panel = self.query_one("#chat-panel")
-                chat_panel.add_assistant_message(f"Job marked as applied: {job.company} - {job.title}")
+                # try:
+                #     chat_panel = self.query_one("#chat-panel", expect_type=ChatPanel)
+                #     chat_panel.add_assistant_message(f"Job marked as applied: {job.company} - {job.title}")
+                # except Exception:
+                #     pass  # Chat panel not in the UI
             else:
-                self.notify("Failed to mark job as applied", severity="error", timeout=3)
+                error_msg = f"Failed to mark job '{job.title}' at '{job.company}' as applied - application service returned None"
+                Slogger.error(error_msg, context)
+                
+                # Provide a more informative error message
+                self.notify(
+                    "Failed to mark job as applied. Check logs for details.", 
+                    severity="error", 
+                    timeout=5
+                )
         except Exception as e:
-            self.notify(f"Error marking job as applied: {str(e)}", severity="error", timeout=3)
+            error_context = {
+                "screen": "JobsScreen",
+                "method": "_mark_applied_callback",
+                "job_id": job_id,
+                "company": job.company if job else "unknown",
+                "title": job.title if job else "unknown"
+            }
+            
+            Slogger.exception(e, f"Exception occurred while marking job as applied", error_context)
+            
+            # Provide a more detailed error message to the user
+            error_type = type(e).__name__
+            self.notify(
+                f"Error marking job as applied: {error_type} - {str(e)}", 
+                severity="error", 
+                timeout=5
+            )

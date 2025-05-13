@@ -27,6 +27,7 @@ class JobActionsModal(ModalScreen):
         hide_callback: Callable[[str], None],
         delete_callback: Callable[[str], None],
         mark_applied_callback: Callable[[str], None],
+        update_status_callback: Optional[Callable[[str, str], None]] = None,
         *,
         id: str | None = None,
         name: str | None = None,
@@ -50,6 +51,7 @@ class JobActionsModal(ModalScreen):
         self.hide_callback = hide_callback
         self.delete_callback = delete_callback
         self.mark_applied_callback = mark_applied_callback
+        self.update_status_callback = update_status_callback
 
     def compose(self) -> ComposeResult:
         """Compose the modal content."""
@@ -64,6 +66,17 @@ class JobActionsModal(ModalScreen):
             # Actions list
             with Vertical(id="actions-list"):
                 yield Button("Mark Applied", variant="success", id="mark-applied-button")
+                
+                # Status update buttons
+                with Vertical(id="status-buttons"):
+                    yield Label("Update Status:", id="status-label")
+                    yield Button("Interested", variant="primary", id="status-interested-button")
+                    yield Button("Applied", variant="primary", id="status-applied-button")
+                    yield Button("Interviewing", variant="primary", id="status-interviewing-button")
+                    yield Button("Offered", variant="primary", id="status-offered-button")
+                    yield Button("Rejected", variant="primary", id="status-rejected-button")
+                    yield Button("Clear Status", variant="primary", id="status-clear-button")
+                
                 yield Button("Hide Job", variant="warning", id="hide-job-button")
                 yield Button("Delete Job", variant="error", id="delete-job-button")
             
@@ -93,5 +106,18 @@ class JobActionsModal(ModalScreen):
         elif button_id == "delete-job-button":
             # Call the delete job callback
             self.delete_callback(self.job_id)
+            # Close the modal after action
+            self.dismiss()
+        # Handle status update buttons
+        elif button_id.startswith("status-") and self.update_status_callback:
+            # Extract status value from button ID
+            status_value = button_id.replace("status-", "").replace("-button", "")
+            
+            # For "clear" status, set to None
+            if status_value == "clear":
+                status_value = None
+                
+            # Call the status update callback
+            self.update_status_callback(self.job_id, status_value)
             # Close the modal after action
             self.dismiss()

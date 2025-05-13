@@ -59,6 +59,10 @@ class JobService:
 
     def hide(self, job_id: str) -> bool:
         return self._jobs.hide(job_id)
+        
+    def update_status(self, job_id: str, status: str) -> bool:
+        """Update the status of a job."""
+        return self._jobs.update(job_id, {"status": status})
 
     def add(self, *, template: Job) -> Optional[Job]:
         """

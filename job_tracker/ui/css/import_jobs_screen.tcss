@@ -1,0 +1,104 @@
+/* Styles for Import Jobs Screen */
+
+#import-jobs-container {
+    width: 100%;
+    height: 100%;
+    padding: 2 4;
+}
+
+#page-title {
+    text-style: bold;
+    margin-bottom: 1;
+    text-align: center;
+    color: $accent;
+    height: 3;
+    background: $boost;
+    border: heavy $accent;
+    padding: 1;
+}
+
+/* Tabs styling */
+#import-tabs {
+    width: 100%;
+    height: auto;
+    margin-bottom: 2;
+}
+
+.tab-description {
+    margin: 1 0;
+    color: $text-muted;
+}
+
+.form-container {
+    margin: 1 0;
+    padding: 1;
+    border: solid $primary-darken-2;
+    background: $surface-darken-1;
+    width: 100%;
+}
+
+.input-with-button {
+    width: 100%;
+    height: 3;
+    margin: 1 0;
+}
+
+.input-with-button Input {
+    width: 4fr;
+}
+
+.input-with-button Button {
+    width: 1fr;
+    max-width: 15;
+}
+
+.status-container {
+    margin-top: 2;
+    padding: 1;
+    border: solid $foreground-lighten-1;
+    background: $background;
+    width: 100%;
+    min-height: 5;
+}
+
+.buttons-row {
+    width: 100%;
+    margin: 1 0;
+    align: center middle;
+}
+
+.buttons-row Button {
+    margin: 0 1;
+}
+
+/* Demo controls */
+.demo-controls {
+    margin-top: 3;
+    padding: 1;
+    border: dashed $warning;
+    background: $surface-darken-1;
+}
+
+.section-title {
+    margin-bottom: 1;
+    text-align: center;
+    background: $warning;
+    color: $text;
+}
+
+#demo-url-import-btn {
+    background: $primary;
+}
+
+#demo-search-btn {
+    background: $primary;
+}
+
+#demo-fail-btn {
+    background: $error;
+}
+
+.progress-container {
+    width: 100%;
+    margin: 1 0;
+}

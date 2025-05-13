@@ -43,6 +43,7 @@ class Job:
     rating_tldr: Optional[str] = None
     star_rating: Optional[str] = None
     job_id: Optional[str] = None
+    status: Optional[str] = None
 
     # ---------- mappings ----------
     @classmethod
@@ -73,6 +74,7 @@ class Job:
             rating_tldr=row.get("rating_tldr"),
             star_rating=row.get("star_rating"),
             job_id=row.get("job_id"),
+            status=row.get("status"),
         )
 
     def to_sqlite(self) -> Dict[str, Any]:
@@ -122,4 +124,5 @@ class Job:
             rating_tldr=doc.get("rating_tldr"),
             star_rating=doc.get("star_rating"),
             job_id=doc.get("job_id"),
+            status=doc.get("status"),
         )

@@ -8,10 +8,25 @@ import argparse
 from pathlib import Path
 from urllib.parse import urlparse
 
-# Import from other modules
-from config import COOKIE_FILE, OUTPUT_DIR, DEFAULT_URL, MAX_RETRIES, RETRY_DELAY
-from fetch import fetch_page, save_to_file
-from extract import extract_job_data_from_html
+# Add parent directories to path
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+tools_dir = os.path.dirname(script_dir)
+project_root = os.path.dirname(tools_dir)
+sys.path.extend([script_dir, tools_dir, project_root])
+
+# Import from common modules
+from tools.common.config import COOKIE_FILE, FETCH_OUTPUT_DIR as OUTPUT_DIR, MAX_RETRIES, RETRY_DELAY
+from tools.common.utils import setup_path
+setup_path()  # Ensure paths are properly set up
+
+# Import from fetch modules
+from tools.fetch.fetch import fetch_page, save_to_file
+from tools.fetch.extract import extract_job_data_from_html
+
+# Constants
+DEFAULT_URL = "https://www.linkedin.com/jobs/collections/recommended/"
 
 # Configure logging
 logging.basicConfig(

@@ -1,0 +1,26 @@
+/* Styles for notification toast system */
+
+#notification-container {
+    /* Use dock and offset instead of fixed positioning */
+    dock: top;
+    offset: 0 5;
+    width: 50;
+    max-width: 80%;
+    height: auto;
+}
+
+#notifications-wrapper {
+    layout: vertical;
+    content-align: right top;  /* Changed from align to content-align */
+    height: auto;
+    width: 100%;
+}
+
+.notification-toast {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+    background: $surface;
+    /* Remove unsupported properties */
+    /* cursor and transition are not supported */
+}

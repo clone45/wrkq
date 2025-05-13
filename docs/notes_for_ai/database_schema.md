@@ -26,31 +26,37 @@ CREATE TABLE "jobs" (
 
 // The history table is a bit outdated, but let's keep it around for now
 CREATE TABLE history (
-    id INTEGER PRIMARY KEY,
-    company_id INTEGER,
-    action TEXT,
-    application_id INTEGER,
-    job_id INTEGER,
-    timestamp TEXT,
-    FOREIGN KEY (company_id) REFERENCES companies(id),
-    FOREIGN KEY (application_id) REFERENCES applications(id),
-    FOREIGN KEY (job_id) REFERENCES jobs(id)
+	id INTEGER PRIMARY KEY,
+	company_id INTEGER,
+	action TEXT,
+	application_id INTEGER,
+	job_id INTEGER,
+	timestamp TEXT,
+	FOREIGN KEY (company_id) REFERENCES companies(id),
+	FOREIGN KEY (application_id) REFERENCES applications(id),
+	FOREIGN KEY (job_id) REFERENCES jobs(id)
 )
 
-CREATE TABLE companies (
-    id INTEGER PRIMARY KEY,
-    original_id TEXT,
-    name TEXT,
-    job_count INTEGER DEFAULT 0
+CREATE TABLE "companies" (
+	"id"	INTEGER,
+	"original_id"	TEXT,
+	"name"	TEXT,
+	"job_count"	INTEGER DEFAULT 0,
+	"created_at"	TEXT,
+	PRIMARY KEY("id")
 )
 
 // A job application is when the user applies to a job
-CREATE TABLE applications (
-    id INTEGER PRIMARY KEY,
-    original_id TEXT,
-    job_id INTEGER,
-    company_id INTEGER,
-    application_date TEXT,
-    FOREIGN KEY (job_id) REFERENCES jobs(id),
-    FOREIGN KEY (company_id) REFERENCES companies(id)
+CREATE TABLE "applications" (
+	"id"	INTEGER,
+	"original_id"	TEXT,
+	"job_id"	INTEGER,
+	"company_id"	INTEGER,
+	"application_date"	TEXT,
+	"notes"	TEXT,
+	"created_at"	TEXT,
+	"updated_at"	TEXT,
+	PRIMARY KEY("id"),
+	FOREIGN KEY("company_id") REFERENCES "companies"("id"),
+	FOREIGN KEY("job_id") REFERENCES "jobs"("id")
 )

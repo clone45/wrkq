@@ -26,7 +26,6 @@ class Application:
     company_id: str
     application_date: datetime
     notes: Optional[str] = None
-    status: str = "applied"  # applied, interview, rejected, offer, accepted
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     original_id: Optional[str] = None
@@ -44,7 +43,6 @@ class Application:
             company_id=str(row.get("company_id", "")),
             application_date=_parse_date(row.get("application_date")),
             notes=row.get("notes"),
-            status=row.get("status", "applied"),
             created_at=_parse_date(row.get("created_at")),
             updated_at=_parse_date(row.get("updated_at")),
             original_id=row.get("original_id"),
@@ -78,7 +76,6 @@ class Application:
             company_id=str(doc.get("company_id", "")),
             application_date=_parse_date(doc.get("application_date")),
             notes=doc.get("notes"),
-            status=doc.get("status", "applied"),
             created_at=_parse_date(doc.get("created_at")),
             updated_at=_parse_date(doc.get("updated_at")),
         )

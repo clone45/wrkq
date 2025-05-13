@@ -1,0 +1,3 @@
+"""
+LinkedIn job fetching functionality.
+"""

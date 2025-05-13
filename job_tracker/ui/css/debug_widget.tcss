@@ -1,0 +1,21 @@
+/* Debug widget CSS */
+
+#debug-container {
+    width: 100%;
+    height: 3;
+    background: $surface-darken-2;
+    border-bottom: solid $primary;
+}
+
+#debug-label {
+    background: $surface-darken-1;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+}
+
+#debug-button {
+    width: 15;
+    background: $primary;
+    color: $text;
+}

@@ -6,8 +6,17 @@ from curl_cffi import requests
 import logging
 from urllib.parse import urlparse
 
-# Import from other modules
-from utils import get_random_user_agent, load_cookies_from_file, create_filename
+# Add parent directories to path
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+tools_dir = os.path.dirname(script_dir)
+project_root = os.path.dirname(tools_dir)
+sys.path.extend([script_dir, tools_dir, project_root])
+
+# Import from common modules
+from tools.common.utils import get_random_user_agent, load_cookies_from_file, create_filename, setup_path
+setup_path()  # Ensure paths are properly set up
 
 # Configure logging
 logger = logging.getLogger(__name__)

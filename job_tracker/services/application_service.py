@@ -38,13 +38,12 @@ class ApplicationService:
         *,
         page: int = 1,
         per_page: int | None = None,
-        status: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None,
     ) -> Page[Application]:
         """Return a Page of Application models filtered / paginated."""
         per_page = per_page or self._per_page
-        filters = self._build_filters(status, job_id, company_id)
+        filters = self._build_filters(job_id, company_id)
 
         apps = self._applications.list(page=page, per_page=per_page, filters=filters)
         total = self._applications.count(filters)
@@ -61,21 +60,12 @@ class ApplicationService:
         return self._applications.by_job_id(job_id)
 
     def get_application_stats(self) -> Dict[str, int]:
-        """Get application statistics per status."""
+        """Get application statistics."""
         stats = {
-            "applied": 0,
-            "interview": 0,
-            "rejected": 0,
-            "offer": 0,
-            "accepted": 0,
             "total": 0
         }
         
-        for status in stats.keys():
-            if status != "total":
-                filters = {"status": status}
-                stats[status] = self._applications.count(filters)
-        
+        # Count all applications
         stats["total"] = self._applications.count({})
         return stats
 
@@ -88,8 +78,7 @@ class ApplicationService:
         *, 
         job_id: str, 
         application_date: datetime = None,
-        notes: str = "",
-        status: str = "applied"
+        notes: str = ""
     ) -> Optional[Application]:
         """
         Create a new job application.
@@ -102,7 +91,9 @@ class ApplicationService:
         # Get the job details to get company_id
         job = self._jobs.by_id(job_id)
         if not job:
-            print(f"Job not found with ID: {job_id}")
+            from simple_logger import Slogger, LogLevel
+            Slogger.error(f"Job not found with ID: {job_id}", 
+                        {"service": "ApplicationService", "method": "add", "job_id": job_id})
             return None
             
         # Use current date if not provided
@@ -116,30 +107,18 @@ class ApplicationService:
             company_id=job.company_id,
             application_date=application_date,
             notes=notes,
-            status=status,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
         
         return self._applications.add(application)
 
-    def update_status(self, application_id: str, status: str) -> bool:
-        """Update the status of an application."""
-        if status not in ["applied", "interview", "rejected", "offer", "accepted"]:
-            print(f"Invalid status: {status}")
-            return False
-            
-        return self._applications.update_status(application_id, status)
+    # update_status method removed as we no longer track application status
         
     def update(self, application_id: str, updates: Dict) -> bool:
         """Update application properties."""
-        allowed_fields = ["notes", "status", "application_date"]
+        allowed_fields = ["notes", "application_date"]
         filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
-        
-        if "status" in filtered_updates:
-            if filtered_updates["status"] not in ["applied", "interview", "rejected", "offer", "accepted"]:
-                print(f"Invalid status: {filtered_updates['status']}")
-                return False
                 
         return self._applications.update(application_id, filtered_updates)
 
@@ -153,15 +132,11 @@ class ApplicationService:
 
     @staticmethod
     def _build_filters(
-        status: Optional[str] = None,
         job_id: Optional[str] = None,
         company_id: Optional[str] = None
     ) -> dict:
         """Build filters for SQLite queries."""
         filters = {}
-        
-        if status:
-            filters["status"] = status
             
         if job_id:
             filters["job_id"] = job_id

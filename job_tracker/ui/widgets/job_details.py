@@ -39,6 +39,7 @@ class JobDetail(Container):
             yield Horizontal(Label("Salary:", classes="detail-label"), Label("-", id="detail-salary", classes="detail-value"), classes="detail-row")
             yield Horizontal(Label("Posted:", classes="detail-label"), Label("-", id="detail-posted", classes="detail-value"), classes="detail-row")
             yield Horizontal(Label("Source:", classes="detail-label"), Label("-", id="detail-source", classes="detail-value"), classes="detail-row")
+            yield Horizontal(Label("Status:", classes="detail-label"), Label("-", id="detail-status", classes="detail-value"), classes="detail-row")
             yield Horizontal(Label("Hidden:", classes="detail-label"), Label("-", id="detail-hidden", classes="detail-value"), classes="detail-row")
             yield Horizontal(Label("Link:", classes="detail-label"), Label("-", id="detail-link", classes="detail-value"), classes="detail-row")
 
@@ -114,6 +115,7 @@ class JobDetail(Container):
         sal_lbl       = self.query_one("#detail-salary", Label)
         post_lbl      = self.query_one("#detail-posted", Label)
         src_lbl       = self.query_one("#detail-source", Label)
+        status_lbl    = self.query_one("#detail-status", Label)
         hid_lbl       = self.query_one("#detail-hidden", Label)
         link_lbl      = self.query_one("#detail-link", Label)
         desc_md       = self.query_one("#job-description-content", Markdown)  # Using Markdown widget
@@ -130,6 +132,7 @@ class JobDetail(Container):
             post_lbl.update(self._fmt_date(job.posting_date))
             # Use getattr for safety if attributes might be missing from some Job objects
             src_lbl.update(getattr(job, "source", "N/A"))  # Assuming 'source' attribute might exist
+            status_lbl.update(job.status or "N/A")
             hid_lbl.update("Yes" if job.hidden else "No")
             link_lbl.update(getattr(job, "details_link", "N/A"))  # Assuming 'details_link' attribute might exist
 
@@ -145,7 +148,7 @@ class JobDetail(Container):
         else:
             # Clear details when no job is selected
             company_title.update("No Job Selected")
-            for lbl in (loc_lbl, sal_lbl, post_lbl, src_lbl, hid_lbl, link_lbl):
+            for lbl in (loc_lbl, sal_lbl, post_lbl, src_lbl, status_lbl, hid_lbl, link_lbl):
                 lbl.update("-")
 
             desc_md.update("")  # Clear markdown content

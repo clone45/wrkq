@@ -1,0 +1,20 @@
+{
+  "workflows": [
+    {
+      "name": "default",
+      "max_age_hours": 24,
+      "pages": 10,
+      "urls": [
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=software%20engineering%20manager",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22engineering%20manager%22",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=development%20manager",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22technical%20product%20manager%22",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22product%20manager%22",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&geoId=102277331&keywords=software%20engineering%20manager&location=San%20Francisco%2C%20California%2C%20United%20States",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&geoId=102277331&keywords=technical%20product%20manager&location=San%20Francisco%2C%20California%2C%20United%20States",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22Manager%20Software%20Development%22",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=product%20engineer"
+      ]
+    }
+  ]
+}

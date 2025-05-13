@@ -1,0 +1,3 @@
+"""
+LinkedIn job search functionality.
+"""

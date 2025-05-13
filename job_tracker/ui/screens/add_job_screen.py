@@ -5,6 +5,7 @@ Screen for adding a new job application to the system.
 from __future__ import annotations
 
 import asyncio
+import traceback
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, List
 
@@ -21,7 +22,7 @@ from job_tracker.services.openai_service import OpenAIService
 from job_tracker.services.job_extractor_service import JobExtractorService
 from job_tracker.models.job import Job
 from job_tracker.ui.widgets.loading_indicator import LoadingOverlay
-from simple_logger import Slogger
+from simple_logger import Slogger, LogLevel
 
 class AddJobScreen(Screen):
     """Full-screen interface for adding a new job application."""
@@ -79,9 +80,8 @@ class AddJobScreen(Screen):
         # Main content container
         with Container(id="add-job-container"):
             # Title section
-            with Container(id="add-job-title-section"):
-                yield Label("Add New Job Application", id="page-title", classes="heading")
-                yield Label("Enter the details of the job you're applying for", classes="subheading")
+#            with Container(id="add-job-title-section"):
+#                yield Label("Add New Job Application", id="page-title", classes="heading")
             
             # URL input bar with import button at the top
             with Container(id="url-input-container"):
@@ -242,7 +242,13 @@ class AddJobScreen(Screen):
                 
                 # Log the error with method if available
                 method = job_info.get("extraction_method", "unknown")
-                Slogger.log(f"Error extracting job info via {method}: {error_msg}")
+                context = {
+                    "screen": "AddJobScreen",
+                    "method": "extract_job_info",
+                    "extraction_method": method,
+                    "url": url
+                }
+                Slogger.error(f"Error extracting job info via {method}: {error_msg}", context)
                 
                 # Hide loading overlay
                 loading_overlay = self.query_one(LoadingOverlay)
@@ -262,7 +268,12 @@ class AddJobScreen(Screen):
             
             if not job_info:
                 # No job information extracted
-                Slogger.log(f"No job information could be extracted from URL: {url}")
+                context = {
+                    "screen": "AddJobScreen",
+                    "method": "extract_job_info",
+                    "url": url
+                }
+                Slogger.warning(f"No job information could be extracted from URL: {url}", context)
                 
                 # Hide loading overlay
                 loading_overlay = self.query_one(LoadingOverlay)
@@ -277,7 +288,13 @@ class AddJobScreen(Screen):
             
             # Log extraction method if available
             if "extraction_method" in job_info:
-                Slogger.log(f"Job info extracted using: {job_info['extraction_method']}")
+                context = {
+                    "screen": "AddJobScreen",
+                    "method": "extract_job_info",
+                    "extraction_method": job_info['extraction_method'],
+                    "url": url
+                }
+                Slogger.info(f"Job info extracted using: {job_info['extraction_method']}", context)
             
             # Update form fields with extracted info
             self.populate_form_with_job_info(job_info)
@@ -295,7 +312,12 @@ class AddJobScreen(Screen):
             loading_overlay = self.query_one(LoadingOverlay)
             loading_overlay.stop()
             
-            Slogger.log(f"Error importing job: {repr(e)}")
+            context = {
+                "screen": "AddJobScreen",
+                "method": "extract_job_info",
+                "url": url
+            }
+            Slogger.exception(e, f"Error importing job from URL: {url}", context)
             self.notify(f"Error importing job: {str(e)}", title="Error", severity="error")
             
             return {}
@@ -341,7 +363,12 @@ class AddJobScreen(Screen):
                     date_str = date_obj.strftime('%Y-%m-%d')
                     self.query_one("#posting-date", Input).value = date_str
             except Exception as e:
-                Slogger.log(f"Error formatting posting date: {e}")
+                context = {
+                    "screen": "AddJobScreen",
+                    "method": "populate_form_with_job_info",
+                    "posting_date": job_info["posting_date"]
+                }
+                Slogger.warning(f"Error formatting posting date: {e}", context)
                 
         # Update job description
         if "description" in job_info and job_info["description"]:
@@ -402,22 +429,42 @@ class AddJobScreen(Screen):
             return
         
         # Find or create company
+        # Create context for logging
+        context = {
+            "screen": "AddJobScreen",
+            "method": "action_submit",
+            "company_name": company_name,
+            "job_title": job_title,
+            "location": location,
+            "source": source
+        }
+        
         try:
+            Slogger.info(f"Attempting to find or create company: '{company_name}'", context)
             company = self.company_repo.find_or_create(company_name=company_name)
-            company_id = str(company.id) if company else None
             
-            if not company_id:
+            if not company:
+                error_msg = f"Failed to create company record for '{company_name}'"
+                Slogger.error(error_msg, context)
                 self.notify(
-                    f"Failed to create company record for '{company_name}'", 
+                    error_msg, 
                     title="Database Error", 
                     severity="error"
                 )
                 return
                 
+            company_id = str(company.id)
+            Slogger.info(f"Successfully found/created company '{company_name}' with ID: {company_id}", context)
+                
         except Exception as e:
+            error_msg = f"Exception while creating company '{company_name}'"
+            Slogger.exception(e, error_msg, context)
+            
+            # Provide a user-friendly message
+            user_msg = f"Failed to create company: {str(e)}"
             log.error(f"Error creating company: {e}")
             self.notify(
-                f"Failed to create company: {str(e)}", 
+                user_msg, 
                 title="Database Error", 
                 severity="error"
             )
@@ -441,23 +488,36 @@ class AddJobScreen(Screen):
         )
         
         # Save to database
+        job_context = context.copy()
+        job_context.update({
+            "company_id": company_id,
+            "job_title": job_title,
+            "operation": "job_creation"
+        })
+        
         try:
+            Slogger.info(f"Attempting to add job: '{job_title}' for company: '{company_name}'", job_context)
             saved_job = self.job_repo.add(new_job)
             
             if saved_job:
+                success_msg = f"Successfully added job: {job_title} at {company_name}"
+                Slogger.info(success_msg, {**job_context, "job_id": saved_job.id})
+                
                 self.notify(
-                    f"Successfully added job: {job_title} at {company_name}",
+                    success_msg,
                     title="Success",
                     severity="information"
                 )
                 
                 # Log the saved job before dismissing
-                Slogger.log(f"Dismissing screen with saved job ID: {saved_job.id}")
+                Slogger.info(f"Dismissing screen with saved job ID: {saved_job.id}")
 
                 self.app.pop_screen()
                 
-
             else:
+                error_msg = f"Failed to save job '{job_title}' to database - job_repo.add returned None"
+                Slogger.error(error_msg, job_context)
+                
                 self.notify(
                     "Failed to save job to database",
                     title="Database Error", 
@@ -465,7 +525,9 @@ class AddJobScreen(Screen):
                 )
 
         except Exception as e:
-            Slogger.log(f"Error saving job: {repr(e)}")
+            error_msg = f"Exception while saving job '{job_title}' for company '{company_name}'"
+            Slogger.exception(e, error_msg, job_context)
+            
             self.notify(
                 f"Error saving job: {str(e)}",
                 title="Database Error", 
@@ -497,7 +559,17 @@ class AddJobScreen(Screen):
                     severity="error"
                 )
                 
-                Slogger.log(f"Worker error: {repr(exception)}")
+                context = {
+                    "screen": "AddJobScreen",
+                    "method": "on_worker_state_changed",
+                    "worker_group": group,
+                    "state": str(state)
+                }
+                
+                if exception:
+                    Slogger.error(f"Worker error: {repr(exception)}", context)
+                else:
+                    Slogger.error("Worker error: Unknown error (no exception provided)", context)
             
             elif state == WorkerState.CANCELLED:
                 # Handle worker cancellation
