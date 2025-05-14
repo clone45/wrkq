@@ -4,6 +4,8 @@ Pipeline orchestrator for LinkedIn job search and storage.
 Handles the overall flow from search to storage.
 """
 
+# tools\search\pipeline.py
+
 import os
 import sys
 import logging

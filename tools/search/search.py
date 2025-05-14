@@ -1,4 +1,4 @@
-"""Functions for searching and retrieving job listings from LinkedIn."""
+# tools\search\search.py
 
 import time
 import json

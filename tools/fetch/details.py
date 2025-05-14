@@ -8,7 +8,7 @@ import json
 import time
 import random
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
 
 # Initialize logger early for error handling
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def fetch_job_details(jobs: List[Dict[str, Any]],
                      max_jobs: Optional[int] = None, 
                      delay_between_requests: int = 3, 
                      verbose: bool = True,
-                     progress_callback: Optional[callable] = None) -> List[Dict[str, Any]]:
+                     progress_callback: Optional[Callable] = None) -> List[Dict[str, Any]]:
     """
     Fetch detailed information for a list of jobs.
     
@@ -62,17 +62,33 @@ def fetch_job_details(jobs: List[Dict[str, Any]],
     
     logger.info(f"Fetching detailed information for {max_to_fetch} out of {job_count} jobs")
     
+    # Initialize progress tracking
     if progress_callback:
-        progress_callback(status_message=f"Fetching details for {max_to_fetch} jobs...")
+        progress_callback(
+            status_message=f"Fetching details for {max_to_fetch} jobs...",
+            jobs_details_fetched=0  # Reset counter
+        )
+        
+        # If using new ProgressDisplay with phase tracking
+        if hasattr(progress_callback, 'begin_phase'):
+            progress_callback.begin_phase("Fetching Details", max_to_fetch)
     
     for i, job in enumerate(jobs[:max_to_fetch]):
-        if verbose:
-            logger.info(f"Processing job {i+1}/{max_to_fetch}: {job.get('title', 'Unknown')}")
+        job_title = job.get('title', 'Unknown Position')
+        company = job.get('company', 'Unknown Company')
         
-        if progress_callback and i % 5 == 0:  # Update progress every 5 jobs
+        if verbose:
+            logger.info(f"Processing job {i+1}/{max_to_fetch}: {job_title}")
+        
+        # Update progress before fetching each job (update every job to show real-time progress)
+        if progress_callback:
             progress_callback(
-                status_message=f"Fetching job details ({i+1}/{max_to_fetch}): {job.get('title', 'Unknown')}"
+                status_message=f"Fetching job {i+1}/{max_to_fetch}: {job_title}",
+                current_job_title=f"{job_title} at {company}"
             )
+            # If using new ProgressDisplay with phase tracking
+            if hasattr(progress_callback, 'update_phase'):
+                progress_callback.update_phase(i, f"Fetching job {i+1}/{max_to_fetch}")
         
         # Get the job URL
         job_url = job.get('url')
@@ -81,6 +97,13 @@ def fetch_job_details(jobs: List[Dict[str, Any]],
         
         if not job_url:
             logger.warning(f"Skipping job {i+1}: No URL available")
+            
+            # Update progress for skipped job
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Skipping job {i+1}: No URL available"
+                )
+                
             continue
         
         # Fetch the job details page
@@ -93,8 +116,22 @@ def fetch_job_details(jobs: List[Dict[str, Any]],
         )
         
         if not response or response.status_code != 200:
-            logger.error(f"Failed to fetch job {i+1} details from {job_url}")
+            error_msg = f"Failed to fetch job {i+1} details from {job_url}"
+            logger.error(error_msg)
+            
+            # Update progress with error
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Error: {error_msg}"
+                )
+                
             continue
+        
+        # Update progress after fetching
+        if progress_callback:
+            progress_callback(
+                status_message=f"Extracting data for job {i+1}/{max_to_fetch}"
+            )
         
         # Save the HTML if output directory provided
         html_path = None
@@ -122,21 +159,50 @@ def fetch_job_details(jobs: List[Dict[str, Any]],
                     logger.info(f"Saved job JSON to {json_path}")
             
             detailed_jobs.append(detailed_job)
+            
+            # Update progress after successful extraction
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Successfully processed job {i+1}/{max_to_fetch}",
+                    jobs_details_fetched=i+1
+                )
+                # If using new ProgressDisplay with phase tracking
+                if hasattr(progress_callback, 'update_phase'):
+                    progress_callback.update_phase(i+1, f"Processed {i+1}/{max_to_fetch} jobs")
         else:
             logger.warning(f"Failed to extract data for job {i+1}")
             # Keep the original job data from search
             detailed_jobs.append(job)
+            
+            # Update progress for failed data extraction
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Failed to extract data for job {i+1}/{max_to_fetch}, using basic data",
+                    jobs_details_fetched=i+1
+                )
+                # If using new ProgressDisplay with phase tracking
+                if hasattr(progress_callback, 'update_phase'):
+                    progress_callback.update_phase(i+1, f"Processed {i+1}/{max_to_fetch} jobs (extraction failed)")
         
         # Add delay between requests
         if i < max_to_fetch - 1:
             delay = delay_between_requests * random.uniform(5.8, 6.2)  # Add jitter
             if verbose:
                 logger.info(f"Waiting {delay:.2f} seconds before next request")
+                
+            # Update progress during wait time
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Waiting {delay:.1f}s before fetching next job..."
+                )
+                
             time.sleep(delay)
     
+    # Final progress update
     if progress_callback:
         progress_callback(
-            status_message=f"Completed fetching details for {len(detailed_jobs)} jobs"
+            status_message=f"Completed fetching details for {len(detailed_jobs)} jobs",
+            jobs_details_fetched=len(detailed_jobs)
         )
     
     return detailed_jobs

@@ -29,6 +29,12 @@ try:
 except ImportError as e:
     missing_deps.append(f"common modules: {str(e)}")
 
+# Check for required third-party libraries
+try:
+    import rich
+except ImportError:
+    missing_deps.append("rich package missing - install with 'pip install rich'")
+
 # Import local modules and handle import errors gracefully
 try:
     from tools.search.cli import parse_args
@@ -55,6 +61,7 @@ def main():
         for dep in missing_deps:
             print(f"  - {dep}")
         print("\nPlease ensure all dependencies are installed and the module structure is correct.")
+        print("To install the required rich package, run: pip install rich")
         return 1
 
     # Initialize with default values

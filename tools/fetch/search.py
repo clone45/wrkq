@@ -1,4 +1,4 @@
-"""Functions for searching and retrieving job listings from LinkedIn."""
+# tools\fetch\search.py
 
 import time
 import json
@@ -295,7 +295,8 @@ def extract_job_from_json_item(item):
     return job
 
 def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5, 
-                jobs_per_page=25, delay_between_requests=3, verbose=True):
+                jobs_per_page=25, delay_between_requests=3, verbose=True,
+                progress_callback=None):  # Added progress_callback parameter
     """
     Search for jobs on LinkedIn using pagination.
     
@@ -307,6 +308,7 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
         jobs_per_page: Number of jobs per page (default 25)
         delay_between_requests: Delay between API requests in seconds
         verbose: Whether to print detailed logs
+        progress_callback: Optional callback for updating progress display
         
     Returns:
         List of job dictionaries with extracted information
@@ -315,13 +317,29 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
     parsed_url = urlparse(search_url)
     logger.info(f"Parsing search URL: {search_url}")
     
+    # Initial progress update
+    if progress_callback:
+        progress_callback(
+            status_message=f"Starting job search...",
+            current_url=search_url
+        )
+        # If using new ProgressDisplay with phase tracking
+        if hasattr(progress_callback, 'begin_phase'):
+            progress_callback.begin_phase("Searching Pages", max_pages)
+    
     # Determine which API endpoint to use
     if "/jobs/search" in parsed_url.path:
         # Regular job search URL
         api_endpoint = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
         logger.info(f"Using LinkedIn jobs API endpoint: {api_endpoint}")
     else:
-        logger.error(f"Unsupported LinkedIn URL path: {parsed_url.path}")
+        error_msg = f"Unsupported LinkedIn URL path: {parsed_url.path}"
+        logger.error(error_msg)
+        
+        # Update progress with error
+        if progress_callback:
+            progress_callback(status_message=f"Error: {error_msg}")
+            
         return []
     
     # Extract important search parameters
@@ -357,6 +375,19 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
         logger.info(f"Page {page+1}/{max_pages}, jobs {start_index+1}-{start_index+jobs_per_page}")
         logger.info(f"Constructed URL: {paginated_url}")
         
+        # Update progress before fetching the page
+        if progress_callback:
+            progress_callback(
+                status_message=f"Fetching page {page+1}/{max_pages}",
+                jobs_in_current_url=len(all_jobs)
+            )
+            # If using new ProgressDisplay with phase tracking
+            if hasattr(progress_callback, 'update_phase'):
+                progress_callback.update_phase(
+                    page, 
+                    f"Page {page+1}/{max_pages}: {len(all_jobs)} jobs so far"
+                )
+        
         # Fetch the page using existing fetch_page function
         response = fetch_page(
             url=paginated_url,
@@ -367,7 +398,13 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
         )
         
         if not response or response.status_code != 200:
-            logger.error(f"Failed to fetch page {page+1}, status code: {response.status_code if response else 'No response'}")
+            error_msg = f"Failed to fetch page {page+1}, status code: {response.status_code if response else 'No response'}"
+            logger.error(error_msg)
+            
+            # Update progress with error
+            if progress_callback:
+                progress_callback(status_message=f"Error: {error_msg}")
+            
             break
         
         logger.info(f"Response status code: {response.status_code}")
@@ -383,6 +420,12 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
         
         # Process the response - Try JSON first, then fall back to HTML
         try:
+            # Update progress while processing
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Processing response for page {page+1}/{max_pages}"
+                )
+            
             # Try to parse as JSON
             json_data = json.loads(response.text)
             logger.info("Successfully parsed response as JSON")
@@ -399,6 +442,12 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
             logger.info(f"Response is not JSON, falling back to HTML parsing")
             # Log the first 500 characters of HTML for debugging
             logger.info(f"HTML preview: {response.text[:500]}...")
+            
+            # Update progress for HTML parsing
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Parsing HTML response for page {page+1}/{max_pages}"
+                )
             
             # Parse HTML response
             page_jobs = extract_jobs_from_search_html(response.text)
@@ -447,16 +496,46 @@ def search_jobs(search_url, cookie_file=None, output_dir=None, max_pages=5,
         all_jobs.extend(page_jobs)
         logger.info(f"Total jobs found so far: {len(all_jobs)}")
         
+        # Update progress after processing this page
+        if progress_callback:
+            progress_callback(
+                total_jobs_found=len(all_jobs),
+                jobs_in_current_url=len(all_jobs),
+                status_message=f"Found {len(page_jobs)} jobs on page {page+1} (total: {len(all_jobs)})"
+            )
+            # If using new ProgressDisplay with phase tracking
+            if hasattr(progress_callback, 'update_phase'):
+                progress_callback.update_phase(
+                    page + 1,  # Mark this page as complete
+                    f"Found {len(all_jobs)} jobs across {page+1} pages"
+                )
+        
         # Add delay between requests to avoid rate limiting
         if page < max_pages - 1:
             delay = delay_between_requests * random.uniform(4.8, 5.2)  # Add jitter
             logger.info(f"Waiting {delay:.2f} seconds before next request")
+            
+            # Update progress during wait
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Waiting {delay:.1f}s before fetching next page..."
+                )
+                
             time.sleep(delay)
+    
+    # Final progress update
+    if progress_callback:
+        progress_callback(
+            status_message=f"Search complete. Found {len(all_jobs)} jobs across {min(page+1, max_pages)} pages",
+            total_jobs_found=len(all_jobs),
+            jobs_in_current_url=len(all_jobs)
+        )
     
     return all_jobs
 
 def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None, 
-                     delay_between_requests=3, verbose=True):
+                     delay_between_requests=3, verbose=True,
+                     progress_callback=None):  # Added progress_callback parameter
     """
     Fetch detailed information for a list of jobs.
     
@@ -467,6 +546,7 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
         max_jobs: Maximum number of jobs to fetch details for (None for all)
         delay_between_requests: Delay between requests in seconds
         verbose: Whether to print detailed logs
+        progress_callback: Optional callback for updating progress display
         
     Returns:
         List of job dictionaries with detailed information
@@ -477,9 +557,32 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
     
     logger.info(f"Fetching detailed information for {max_to_fetch} out of {job_count} jobs")
     
+    # Initial progress update
+    if progress_callback:
+        progress_callback(
+            status_message=f"Fetching details for {max_to_fetch} jobs...",
+            jobs_details_fetched=0
+        )
+        # If using new ProgressDisplay with phase tracking
+        if hasattr(progress_callback, 'begin_phase'):
+            progress_callback.begin_phase("Fetching Details", max_to_fetch)
+    
     for i, job in enumerate(jobs[:max_to_fetch]):
+        job_title = job.get('title', 'Unknown Position')
+        company = job.get('company', 'Unknown Company')
+        
         if verbose:
-            logger.info(f"Processing job {i+1}/{max_to_fetch}: {job.get('title', 'Unknown')}")
+            logger.info(f"Processing job {i+1}/{max_to_fetch}: {job_title}")
+        
+        # Update progress before fetching job details
+        if progress_callback:
+            progress_callback(
+                status_message=f"Fetching details for job {i+1}/{max_to_fetch}: {job_title}",
+                current_job_title=f"{job_title} at {company}"
+            )
+            # If using new ProgressDisplay with phase tracking
+            if hasattr(progress_callback, 'update_phase'):
+                progress_callback.update_phase(i, f"Job {i+1}/{max_to_fetch}: {job_title}")
         
         # Get the job URL
         job_url = job.get('url')
@@ -488,6 +591,13 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
         
         if not job_url:
             logger.warning(f"Skipping job {i+1}: No URL available")
+            
+            # Update progress for skipped job
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Skipped job {i+1}: No URL available"
+                )
+                
             continue
         
         # Fetch the job details page
@@ -500,7 +610,15 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
         )
         
         if not response or response.status_code != 200:
-            logger.error(f"Failed to fetch job {i+1} details from {job_url}")
+            error_msg = f"Failed to fetch job {i+1} details from {job_url}"
+            logger.error(error_msg)
+            
+            # Update progress with error
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Error: {error_msg}"
+                )
+                
             continue
         
         # Save the HTML if output directory provided
@@ -511,6 +629,12 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
                 f.write(response.text)
             if verbose:
                 logger.info(f"Saved job HTML to {html_path}")
+        
+        # Update progress for HTML processing
+        if progress_callback:
+            progress_callback(
+                status_message=f"Extracting data for job {i+1}/{max_to_fetch}"
+            )
         
         # Extract job data using existing function
         job_data = extract_job_data_from_html(response.text)
@@ -529,17 +653,45 @@ def fetch_job_details(jobs, cookie_file=None, output_dir=None, max_jobs=None,
                     logger.info(f"Saved job JSON to {json_path}")
             
             detailed_jobs.append(detailed_job)
+            
+            # Update progress for successful data extraction
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Successfully processed job {i+1}/{max_to_fetch}",
+                    jobs_details_fetched=i+1
+                )
         else:
             logger.warning(f"Failed to extract data for job {i+1}")
             # Keep the original job data from search
             detailed_jobs.append(job)
+            
+            # Update progress for failed data extraction
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Failed to extract data for job {i+1}/{max_to_fetch}, using basic data",
+                    jobs_details_fetched=i+1
+                )
         
         # Add delay between requests
         if i < max_to_fetch - 1:
             delay = delay_between_requests * random.uniform(5.8, 6.2)  # Add jitter
             if verbose:
                 logger.info(f"Waiting {delay:.2f} seconds before next request")
+            
+            # Update progress during wait
+            if progress_callback:
+                progress_callback(
+                    status_message=f"Waiting {delay:.1f}s before fetching next job..."
+                )
+                
             time.sleep(delay)
+    
+    # Final progress update
+    if progress_callback:
+        progress_callback(
+            status_message=f"Fetched details for {len(detailed_jobs)} jobs",
+            jobs_details_fetched=len(detailed_jobs)
+        )
     
     return detailed_jobs
 
