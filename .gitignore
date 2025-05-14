@@ -3,6 +3,7 @@ private/
 tools/search/search_results
 tools/fetch/fetched_pages
 tools/harvest/harvest_main.log
+tools/output
 CLAUDE.md
 
 job_tracker/db/data/sqlite.db
