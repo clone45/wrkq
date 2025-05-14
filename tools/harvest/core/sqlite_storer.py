@@ -115,6 +115,49 @@ class SQLiteStorer(StorerInterface):
                 logger.warning(f"Could not parse posting_date '{posted_date_from_harvest}' for update.")
         return payload
 
+    def is_duplicate_job(self, job_data: Dict[str, Any], options: Optional[StorageOptions] = None) -> bool:
+        """
+        Check if a job with same title and company already exists in the database.
+        
+        Args:
+            job_data: Dictionary containing at least 'title' and 'company' keys
+            options: Storage options with database path
+            
+        Returns:
+            True if a matching job exists, False otherwise
+        """
+        self._ensure_initialized(options)  # Initialize with provided options
+        assert self._job_repo is not None and self._company_repo is not None
+        
+        job_title = job_data.get('title')
+        company_name = job_data.get('company')
+        
+        # Basic validation
+        if not job_title or not company_name:
+            logger.warning("Cannot check for duplicate: missing title or company")
+            return False
+        
+        try:
+            # Get the company ID
+            company_model = self._company_repo.find_by_name(company_name)
+            if not company_model:
+                # If company doesn't exist yet, job can't be a duplicate
+                return False
+                
+            # Check if job with this title and company exists
+            existing_job = self._job_repo.find_by_company_title_location(
+                company_id=company_model.id,
+                title=job_title,
+                location=None  # Ignore location for matching
+            )
+            
+            return existing_job is not None
+            
+        except Exception as e:
+            logger.error(f"Error checking for duplicate job '{job_title}' at '{company_name}': {e}")
+            # On error, assume it's not a duplicate to be safe
+            return False
+
     def store_job_batch(self, jobs: List[Dict[str, Any]], options: Optional[StorageOptions] = None) -> None:
         self._ensure_initialized(options)
         assert self._job_repo is not None and self._company_repo is not None
@@ -135,20 +178,20 @@ class SQLiteStorer(StorerInterface):
                 if not company_model or company_model.id is None: # Check for actual DB ID
                     raise DatabaseError(f"Failed to process company: '{company_name}'")
 
-                existing_job_model: Optional[JobModel] = None
-                if external_job_id and external_job_id != 'N/A':
-                    existing_job_model = self._job_repo.find_by_external_job_id(external_job_id)
-                if not existing_job_model and job_data.get('url'):
-                    existing_job_model = self._job_repo.find_by_details_url(job_data['url'])
-                # Optional: Fallback to company_id, title, location match if desired
-                # if not existing_job_model:
-                #     existing_job_model = self._job_repo.find_by_company_title_location(
-                #         company_model.id, job_data.get('title',''), job_data.get('location')
-                #     )
+                job_title = job_data.get('title')
+                if not job_title:
+                    raise ValueError("Job data is missing 'title' field.")
 
+                # Check for duplicate based on title and company only
+                # We're passing None for location to ignore it in the matching
+                existing_job_model = self._job_repo.find_by_company_title_location(
+                    company_id=company_model.id, 
+                    title=job_title, 
+                    location=None
+                )
 
                 if existing_job_model and existing_job_model.id is not None:
-                    logger.info(f"Job '{job_title_log}' (Ext ID: {external_job_id}) already exists (DB ID: {existing_job_model.id}).")
+                    logger.info(f"Job '{job_title_log}' at '{company_name_log}' already exists (DB ID: {existing_job_model.id}).")
                     if update_existing:
                         update_payload = self._prepare_job_update_payload(job_data, existing_job_model)
                         if update_payload:
@@ -171,7 +214,7 @@ class SQLiteStorer(StorerInterface):
                         self._company_repo.increment_job_count(company_id=company_model.id)
                         self.event_bus.publish(JOB_BASIC_STORED, **{**job_data, "db_id": stored_job_model.id})
                         if job_data.get('description'):
-                             self.event_bus.publish(JOB_DETAILS_STORED, **{**job_data, "db_id": stored_job_model.id})
+                            self.event_bus.publish(JOB_DETAILS_STORED, **{**job_data, "db_id": stored_job_model.id})
                     else:
                         raise DatabaseError(f"JobRepo.add failed for '{job_title_log}' or returned no ID.")
 

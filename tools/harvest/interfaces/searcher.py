@@ -8,7 +8,7 @@ class SearchOptions:
     """Configuration options for job search."""
     max_pages: int = 3
     jobs_per_page: int = 25
-    delay_between_requests: float = 3.0
+    delay_between_requests: float = 10.0
     cookie_file: str = None
     output_dir: str = None
     

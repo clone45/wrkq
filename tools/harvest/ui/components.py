@@ -48,13 +48,12 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
         Rich Table object
     """
     # Create stats table
-    stats_table = Table(show_header=False, box=None, padding=(0, 1)) # Removed expand, simplified padding
-    stats_table.add_column("Key", style="dim", width=16) # Increased width slightly for "Details Fetched"
-    stats_table.add_column("Value", ratio=1) # Allow value column to take remaining space
+    stats_table = Table(show_header=False, box=None, padding=(0, 1))
+    stats_table.add_column("Key", style="dim", width=16)
+    stats_table.add_column("Value", ratio=1)
     
     # URL info and status
-    if stats.get('current_url'): # Use .get for safety
-        # No need for manual truncation if using Text(..., overflow="ellipsis")
+    if stats.get('current_url'):
         stats_table.add_row(
             "Current URL:", 
             Text(stats['current_url'], no_wrap=True, overflow="ellipsis")
@@ -67,6 +66,7 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
     
     # Job counts
     stats_table.add_row("Jobs Found:", str(stats.get('jobs_found', 0)))
+    stats_table.add_row("Duplicates Found:", str(stats.get('jobs_duplicate', 0)))  # Added this line
     stats_table.add_row("Details Fetched:", str(stats.get('jobs_detailed', 0)))
     stats_table.add_row("Jobs Filtered:", str(stats.get('jobs_filtered', 0)))
     stats_table.add_row("Jobs Stored:", str(stats.get('jobs_stored', 0)))
@@ -76,11 +76,9 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
         stats_table.add_row("Errors:", Text(str(errors_count), style="bold red"))
     
     # Time information
-    elapsed_seconds = time.time() - stats.get('start_time', time.time()) # Default to 0 elapsed if start_time missing
+    elapsed_seconds = time.time() - stats.get('start_time', time.time())
     stats_table.add_row("Elapsed Time:", format_time(elapsed_seconds))
     
-    # This table has 6-8 rows depending on current_url and errors.
-    # Max 8 rows.
     return stats_table
 
 def create_events_panel(events: List[Tuple[str, str, str]]) -> Panel:
@@ -140,12 +138,13 @@ def get_event_style(event_type: str) -> str:
         "Details": "green",
         "Filter": "yellow",
         "Storage": "magenta",
-        "Error": "bold red", # Made error bold as well
+        "Error": "bold red",
         "Pipeline": "cyan bold",
-        "URL": "bright_blue", # Added a style for URL events
-        "Job": "bright_green"  # Added a style for Job events
+        "URL": "bright_blue",
+        "Job": "bright_green",
+        "Duplicate": "bright_yellow"  # Added this line
     }
-    return event_styles.get(event_type, "dim cyan") # Default to a dim cyan
+    return event_styles.get(event_type, "dim cyan")
 
 def create_summary_table(stats: Dict[str, Any]) -> Table:
     """
@@ -163,6 +162,7 @@ def create_summary_table(stats: Dict[str, Any]) -> Table:
     
     table.add_row("URLs Processed", str(stats.get('urls_processed', 0)))
     table.add_row("Total Jobs Found", str(stats.get('jobs_found', 0)))
+    table.add_row("Duplicate Jobs Found", str(stats.get('jobs_duplicate', 0)))  # Added this line
     table.add_row("Jobs with Details", str(stats.get('jobs_detailed', 0)))
     table.add_row("Jobs Filtered Out", str(stats.get('jobs_filtered', 0)))
     table.add_row("Jobs Stored", str(stats.get('jobs_stored', 0)))

@@ -3,7 +3,7 @@
 import sqlite3
 import logging
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List, Union
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ class SQLiteDBConnection:
     def _create_tables_if_not_exist(self):
         """
         Creates the 'companies' and 'jobs' tables if they don't already exist.
-        This makes the tool more self-contained.
         """
         if not self.conn:
             logger.error("Cannot create tables: database connection not established.")
@@ -71,7 +70,7 @@ class SQLiteDBConnection:
 
         try:
             cursor = self.cursor()
-            # Create Companies Table
+            # Create Companies Table (remains the same)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS companies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,8 +82,7 @@ class SQLiteDBConnection:
             """)
             logger.info("Ensured 'companies' table exists.")
 
-            # Create Jobs Table
-            # Based on your Job model fields
+            # Create Jobs Table - ADD employment_type
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,23 +90,24 @@ class SQLiteDBConnection:
                     company TEXT,
                     title TEXT NOT NULL,
                     location TEXT,
-                    posting_date TEXT, -- Store as ISO8601 string
+                    posting_date TEXT,
                     salary TEXT,
                     hidden BOOLEAN DEFAULT 0,
-                    hidden_date TEXT, -- Store as ISO8601 string
-                    created_at TEXT, -- Store as ISO8601 string
+                    hidden_date TEXT,
+                    created_at TEXT,
                     job_description TEXT,
                     slug TEXT,
-                    original_id TEXT, -- External ID from source system
+                    original_id TEXT,
                     blurb TEXT,
                     site_name TEXT,
-                    details_link TEXT UNIQUE, -- Should be unique for a given job posting
+                    details_link TEXT UNIQUE,
                     review_status TEXT,
                     rating_rationale TEXT,
                     rating_tldr TEXT,
                     star_rating TEXT,
-                    job_id TEXT, -- LinkedIn's job ID (external), should ideally be unique or part of a composite key
+                    job_id TEXT, 
                     status TEXT,
+                    employment_type TEXT, -- <<<<<<<<<<<<<<<<<<<< ADDED THIS LINE
                     FOREIGN KEY (company_id) REFERENCES companies (id)
                 )
             """)
@@ -117,14 +116,13 @@ class SQLiteDBConnection:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_details_link ON jobs (details_link)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_company_title ON jobs (company COLLATE NOCASE, title COLLATE NOCASE)")
 
-
-            logger.info("Ensured 'jobs' table exists.")
+            logger.info("Ensured 'jobs' table exists (with employment_type).")
             self.commit()
         except sqlite3.Error as e:
             logger.error(f"Error creating tables: {e}", exc_info=True)
-            self.rollback() # Rollback if table creation fails
-            raise # Re-raise so the app knows something is wrong with DB setup
-
+            self.rollback()
+            raise
+        
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         """Executes a SQL query and returns the cursor."""
         cur = self.cursor()

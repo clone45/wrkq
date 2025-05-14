@@ -11,6 +11,7 @@ SEARCH_STARTED = "search_started"
 SEARCH_PAGE_FETCHED = "search_page_fetched"
 SEARCH_COMPLETED = "search_completed"
 JOB_FOUND = "job_found"
+JOB_DUPLICATE_FOUND = "job_duplicate_found"
 
 # Detail events
 DETAIL_FETCHING_STARTED = "detail_fetching_started"

@@ -52,32 +52,21 @@ class Pipeline(JobPipelineInterface):
     def process_url(self, url: str, config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """
         Process a single LinkedIn search URL.
-        This implementation orchestrates the search, detail, filter, and store steps,
-        and handles errors from components.
         """
         effective_config = self._get_effective_config(config)
         
-        # Example: If config is absolutely required, you might do this:
-        # if effective_config is None:
-        #     err_msg = "Pipeline configuration is missing and no default is set."
-        #     logger.error(err_msg)
-        #     self.event_bus.publish(PIPELINE_ERROR, error=err_msg, url=url, stage="configuration", error_type="ConfigError")
-        #     # Decide: return error stats or raise ConfigError(err_msg)
-        #     return {"errors": 1} # Or re-raise
-
         logger.info(f"Processing URL: {url}")
         self.event_bus.publish(URL_PROCESSING_STARTED, url=url)
 
         url_stats: Dict[str, int] = {
             "jobs_found": 0,
+            "jobs_duplicate": 0,  # New stat for duplicate jobs
             "jobs_detailed": 0,
             "jobs_filtered_out": 0,
             "jobs_kept": 0,
-            "jobs_stored_attempts": 0, # How many jobs were passed to the storer
+            "jobs_stored_attempts": 0, 
             "errors": 0
         }
-        # Note: The RichProgressDisplay gets its 'jobs_stored' count from actual JOB_BASIC_STORED events.
-        # 'jobs_stored_attempts' here is just for the pipeline's own returned stats.
 
         try:
             # 1. Search
@@ -87,38 +76,59 @@ class Pipeline(JobPipelineInterface):
 
             if not found_jobs:
                 logger.info(f"No jobs found for URL: {url}")
-                # 'finally' block will publish URL_PROCESSING_COMPLETED
-                return url_stats # Exit early for this URL if no jobs
+                return url_stats  # Exit early for this URL if no jobs
 
-            # 2. Detail Fetching
+            # Get storage options for duplicate checking
+            storage_opts = effective_config.storage_options if effective_config else None
+            
+            # 2. Check for duplicates
+            unique_jobs: List[Dict[str, Any]] = []
+            duplicate_jobs: List[Dict[str, Any]] = []
+            
+            for job in found_jobs:
+                # Pass storage options to is_duplicate_job
+                if self.storer.is_duplicate_job(job, options=storage_opts):
+                    duplicate_jobs.append(job)
+                    job_title = job.get('title', 'Unknown Title')
+                    job_company = job.get('company', 'Unknown Company')
+                    logger.info(f"Found duplicate job: '{job_title}' at '{job_company}'")
+                    self.event_bus.publish(JOB_DUPLICATE_FOUND, **job)
+                else:
+                    unique_jobs.append(job)
+            
+            url_stats["jobs_duplicate"] = len(duplicate_jobs)
+            logger.info(f"Found {len(duplicate_jobs)} duplicate jobs and {len(unique_jobs)} unique jobs")
+
+            # 3. Detail Fetching (only for unique jobs)
             detail_opts = effective_config.detail_options if effective_config else None
-            # Use the batch method name from the interface
-            detailed_jobs: List[Dict[str, Any]] = self.detailer.fetch_details_batch(found_jobs, options=detail_opts)
+            
+            if unique_jobs:
+                # Only fetch details for non-duplicate jobs
+                detailed_jobs: List[Dict[str, Any]] = self.detailer.fetch_details_batch(unique_jobs, options=detail_opts)
+                
+                # Count how many jobs actually got details
+                url_stats["jobs_detailed"] = sum(1 for job in detailed_jobs if job.get('description'))
+            else:
+                detailed_jobs = []
+                url_stats["jobs_detailed"] = 0
+                logger.info(f"No unique jobs to fetch details for in URL: {url}")
 
-            # Count how many jobs actually got details (e.g., by checking for a 'description' key)
-            # This assumes your detailer adds such a key upon successful detail fetching.
-            url_stats["jobs_detailed"] = sum(1 for job in detailed_jobs if job.get('description'))
-
-
-            # 3. Filtering
+            # Rest of the method remains the same...
+            # 4. Filtering
             filter_opts = effective_config.filter_options if effective_config else None
-            kept_jobs: List[Dict[str, Any]] = self.filterer.filter_job_batch(detailed_jobs, options=filter_opts) # NEW CALL
+            kept_jobs: List[Dict[str, Any]] = self.filterer.filter_job_batch(detailed_jobs, options=filter_opts)
             url_stats["jobs_kept"] = len(kept_jobs)
             url_stats["jobs_filtered_out"] = len(detailed_jobs) - len(kept_jobs)
 
             if not kept_jobs:
                 logger.info(f"No jobs kept after filtering for URL: {url}")
-                # 'finally' block will publish URL_PROCESSING_COMPLETED
-                return url_stats # Exit early if no jobs to store
+                return url_stats  # Exit early if no jobs to store
 
-            # 4. Storage
-            storage_opts = effective_config.storage_options if effective_config else None
-            # Use the batch method name from the interface
+            # 5. Storage
             self.storer.store_job_batch(kept_jobs, options=storage_opts)
             url_stats["jobs_stored_attempts"] = len(kept_jobs)
 
             logger.info(f"Successfully completed processing stages for URL: {url}")
-
         # Specific Harvest Errors - these are "known" error types from our application
         except AuthenticationError as ae:
             logger.error(f"Authentication error during processing of {url}: {ae}")
@@ -167,7 +177,6 @@ class Pipeline(JobPipelineInterface):
     def process_urls(self, urls: List[str], config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """
         Process multiple LinkedIn search URLs.
-        (This method remains the same as previously discussed, calling the above process_url)
         """
         logger.info(f"Starting processing for {len(urls)} URLs.")
         self.event_bus.publish(PIPELINE_STARTED, url_count=len(urls))
@@ -175,6 +184,7 @@ class Pipeline(JobPipelineInterface):
         aggregated_stats: Dict[str, int] = {
             "total_urls_processed": 0,
             "total_jobs_found": 0,
+            "total_jobs_duplicate": 0,  # New stat for duplicates
             "total_jobs_detailed": 0,
             "total_jobs_filtered_out": 0,
             "total_jobs_kept": 0,
@@ -184,11 +194,11 @@ class Pipeline(JobPipelineInterface):
 
         for i, url in enumerate(urls):
             try:
-                # Pass the per-call config (if any) to each process_url call
                 url_stats = self.process_url(url, config=config) 
                 
-                aggregated_stats["total_urls_processed"] += 1 # This counts attempts, successful or with caught errors
+                aggregated_stats["total_urls_processed"] += 1
                 aggregated_stats["total_jobs_found"] += url_stats.get("jobs_found", 0)
+                aggregated_stats["total_jobs_duplicate"] += url_stats.get("jobs_duplicate", 0)  # Add duplicate stats
                 aggregated_stats["total_jobs_detailed"] += url_stats.get("jobs_detailed", 0)
                 aggregated_stats["total_jobs_filtered_out"] += url_stats.get("jobs_filtered_out", 0)
                 aggregated_stats["total_jobs_kept"] += url_stats.get("jobs_kept", 0)
@@ -196,15 +206,9 @@ class Pipeline(JobPipelineInterface):
                 aggregated_stats["total_errors"] += url_stats.get("errors", 0)
 
             except Exception as e:
-                # This would catch errors if process_url itself re-raised them,
-                # or if there was an issue in the loop setup NOT covered by process_url's try/except.
-                # This is less likely if process_url catches broadly.
                 logger.critical(f"FATAL: Uncaught exception in process_urls loop for URL {url}: {e}", exc_info=True)
-                aggregated_stats["total_errors"] += 1 # Count this as an error too
-                # Potentially stop all processing here by re-raising or breaking
-                # For now, we'll log and let PIPELINE_ERROR be published if necessary
+                aggregated_stats["total_errors"] += 1
                 self.event_bus.publish(PIPELINE_ERROR, error=f"Critical loop error: {str(e)}", url=url, stage="batch_url_processing_loop")
-
 
         logger.info(f"Finished processing all URLs. Aggregated stats: {aggregated_stats}")
         self.event_bus.publish(PIPELINE_COMPLETED, **aggregated_stats)

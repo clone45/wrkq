@@ -50,12 +50,13 @@ class RichProgressDisplay(ProgressDisplay):
         self.stats = {
             'urls_total': 0,
             'urls_processed': 0,
-            'jobs_found': 0,
-            'jobs_detailed': 0,
-            'jobs_filtered': 0,
-            'jobs_stored': 0,
+            'jobs_found': 0,       # Total unique jobs identified by searcher across all URLs
+            'jobs_duplicate': 0,   # Total duplicate jobs found (new field)
+            'jobs_detailed': 0,    # Total jobs for which details were successfully fetched
+            'jobs_filtered': 0,    # Total jobs filtered out by the filterer
+            'jobs_stored': 0,      # Total jobs successfully passed to storer (basic info stored)
             'errors': 0,
-            'start_time': time.time(),
+            'start_time': time.time(), # Set initial start time here
             'current_url': '',
             'current_job': '',
             'status_message': 'Initializing...'
@@ -66,7 +67,8 @@ class RichProgressDisplay(ProgressDisplay):
         
         # Initialize event handlers
         self.event_handlers = EventHandlers(
-            update_callback=self.update,
+            stats_dict=self.stats,
+            update_callback=self.update,       # This is RichProgressDisplay.update
             begin_phase_callback=self.begin_phase,
             update_phase_callback=self.update_phase,
             add_event_callback=self.add_event
@@ -140,6 +142,7 @@ class RichProgressDisplay(ProgressDisplay):
         """Subscribe to relevant events from the event bus."""
         # Pipeline events
         self.event_bus.subscribe(PIPELINE_STARTED, self.event_handlers.handle_pipeline_started)
+        self.event_bus.subscribe(PIPELINE_ERROR, self.event_handlers.handle_error)
         self.event_bus.subscribe(PIPELINE_COMPLETED, self.event_handlers.handle_pipeline_completed)
         self.event_bus.subscribe(URL_PROCESSING_STARTED, self.event_handlers.handle_url_started)
         self.event_bus.subscribe(URL_PROCESSING_COMPLETED, self.event_handlers.handle_url_completed)
@@ -149,6 +152,7 @@ class RichProgressDisplay(ProgressDisplay):
         self.event_bus.subscribe(SEARCH_PAGE_FETCHED, self.event_handlers.handle_search_page)
         self.event_bus.subscribe(SEARCH_COMPLETED, self.event_handlers.handle_search_completed)
         self.event_bus.subscribe(JOB_FOUND, self.event_handlers.handle_job_found)
+        self.event_bus.subscribe(JOB_DUPLICATE_FOUND, self.event_handlers.handle_job_duplicate_found)
         
         # Detail events
         self.event_bus.subscribe(DETAIL_FETCHING_STARTED, self.event_handlers.handle_detail_started)
@@ -170,17 +174,17 @@ class RichProgressDisplay(ProgressDisplay):
         self.event_bus.subscribe(FILTER_ERROR, self.event_handlers.handle_error)
         self.event_bus.subscribe(STORAGE_ERROR, self.event_handlers.handle_error)
     
-    def update(self, **stats: Any) -> None:
+    def update(self, **new_stats_to_display: Any) -> None:
         """
-        Update the progress display with new statistics.
-        
-        Args:
-            **stats: Key-value pairs of statistics to update
+        Update the self.stats dictionary AND trigger a display refresh.
+        This is the primary callback for EventHandlers to update the display.
         """
         # Update statistics
-        for key, value in stats.items():
+        for key, value in new_stats_to_display.items():
             if key in self.stats:
                 self.stats[key] = value
+            else: # Log if trying to update a stat that doesn't exist (might be a typo)
+                logger.warning(f"Attempted to update non-existent stat key: {key}")
                 
         # Update the display
         self._update_display()

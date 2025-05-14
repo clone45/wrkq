@@ -29,13 +29,16 @@ PROJECT_ROOT_DIR = Path(__file__).resolve().parent.parent
 # this might need to be determined differently, e.g. by finding a .git folder or a project marker file.
 # For now, let's assume a typical script execution from project root.
 
+# HARVEST_PACKAGE_DIR is the root of the 'harvest' package itself
+HARVEST_PACKAGE_DIR = Path(__file__).resolve().parent # This is C:\Code\wrkq\tools\harvest\
+
 DEFAULT_CONFIG_DIR = PROJECT_ROOT_DIR / "config" # Default location for filter/workflow JSON files
 DEFAULT_PRIVATE_DIR = PROJECT_ROOT_DIR / "private"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT_DIR / "output" / "harvest_results"
 DEFAULT_LOGS_DIR = PROJECT_ROOT_DIR / "logs"
 
-DEFAULT_COOKIE_FILE = DEFAULT_PRIVATE_DIR / "linkedin_cookies.json" # Example name
-DEFAULT_DB_PATH = PROJECT_ROOT_DIR / "data" / "harvested_jobs.sqlite" # Example name
+DEFAULT_COOKIE_FILE = HARVEST_PACKAGE_DIR / "private" / "www.linkedin.com_cookies.json" 
+DEFAULT_DB_PATH = PROJECT_ROOT_DIR / "data" / "harvested_jobs.sqlite"
 
 DEFAULT_FILTERS_DIR_NAME = "filters" # Subdirectory within config_dir
 DEFAULT_WORKFLOWS_FILE_NAME = "workflows.json" # File within config_dir

@@ -9,7 +9,7 @@ class DetailOptions:
     """Configuration options for job detail fetching."""
     cookie_file: str = None
     output_dir: str = None # Similar note as SearchOptions.output_dir
-    delay_between_requests: float = 3.0
+    delay_between_requests: float = 10.0
     
 class DetailerInterface:
     """Interface for fetching detailed job information."""

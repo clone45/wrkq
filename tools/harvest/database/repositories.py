@@ -7,7 +7,7 @@ from datetime import datetime
 
 from .connection import SQLiteDBConnection # Use the new connection class
 from .models import CompanyModel, JobModel # Use the new model classes
-from ...errors import DatabaseError # harvest's DatabaseError
+from ..errors import DatabaseError # harvest's DatabaseError
 
 logger = logging.getLogger(__name__)
 
