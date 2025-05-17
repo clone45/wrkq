@@ -5,6 +5,7 @@ UI components for the LinkedIn job harvester.
 """
 
 import time
+import logging
 # datetime is not used in this file, but keeping it for consistency if other modules expect it
 # from datetime import datetime 
 from typing import Dict, Any, List, Optional, Tuple # Optional not used here, Tuple is
@@ -12,6 +13,8 @@ from rich.console import Console, Group # Console, Group not directly used in th
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+logger = logging.getLogger(__name__)
 
 def format_time(seconds: float) -> str:
     """
@@ -47,6 +50,11 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
     Returns:
         Rich Table object
     """
+    # Log current stats state
+    logger.debug(f"Creating stats table with stats: jobs_found={stats.get('jobs_found', 0)}, "
+                f"jobs_filtered_out={stats.get('jobs_filtered_out', 0)}, "
+                f"jobs_stored={stats.get('jobs_stored', 0)}")
+    
     # Create stats table
     stats_table = Table(show_header=False, box=None, padding=(0, 1))
     stats_table.add_column("Key", style="dim", width=16)
@@ -64,16 +72,28 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
         Text(str(stats.get('status_message', 'N/A')), no_wrap=True, overflow="ellipsis")
     )
     
-    # Job counts
-    stats_table.add_row("Jobs Found:", str(stats.get('jobs_found', 0)))
-    stats_table.add_row("Duplicates Found:", str(stats.get('jobs_duplicate', 0)))  # Added this line
-    stats_table.add_row("Details Fetched:", str(stats.get('jobs_detailed', 0)))
-    stats_table.add_row("Jobs Filtered:", str(stats.get('jobs_filtered', 0)))
-    stats_table.add_row("Jobs Stored:", str(stats.get('jobs_stored', 0)))
+    # Job counts with logging
+    jobs_found = stats.get('jobs_found', 0)
+    jobs_filtered = stats.get('jobs_filtered_out', 0)
+    jobs_stored = stats.get('jobs_stored', 0)
+    jobs_duplicate = stats.get('jobs_duplicate', 0)
+    
+    logger.info(f"Displaying job counts - Found: {jobs_found}, Filtered: {jobs_filtered}, "
+               f"Stored: {jobs_stored}, Duplicate: {jobs_duplicate}")
+    
+    stats_table.add_row("Jobs Found:", str(jobs_found))
+    stats_table.add_row("Duplicates:", str(jobs_duplicate))
+    stats_table.add_row("Filtered:", str(jobs_filtered))
+    stats_table.add_row("Stored:", str(jobs_stored))
+    
+    # Calculate and log remaining jobs
+    remaining_jobs = jobs_found - jobs_filtered
+    logger.info(f"Calculated remaining jobs: {remaining_jobs} (Found: {jobs_found} - Filtered: {jobs_filtered})")
     
     errors_count = stats.get('errors', 0)
     if errors_count > 0:
         stats_table.add_row("Errors:", Text(str(errors_count), style="bold red"))
+        logger.warning(f"Displaying {errors_count} errors in stats table")
     
     # Time information
     elapsed_seconds = time.time() - stats.get('start_time', time.time())
@@ -156,16 +176,34 @@ def create_summary_table(stats: Dict[str, Any]) -> Table:
     Returns:
         Rich Table object
     """
+    # Log summary stats
+    logger.info(f"Creating final summary table with stats: "
+               f"URLs={stats.get('urls_processed', 0)}, "
+               f"Total Jobs={stats.get('jobs_found', 0)}, "
+               f"Filtered={stats.get('jobs_filtered_out', 0)}, "
+               f"Stored={stats.get('jobs_stored', 0)}")
+    
     table = Table(show_header=False, title="[bold]Summary[/bold]", title_style="bold white on blue", box=None)
-    table.add_column("Statistic", style="dim", min_width=20) # min_width to ensure title fits
+    table.add_column("Statistic", style="dim", min_width=20)
     table.add_column("Value", justify="right")
     
-    table.add_row("URLs Processed", str(stats.get('urls_processed', 0)))
-    table.add_row("Total Jobs Found", str(stats.get('jobs_found', 0)))
-    table.add_row("Duplicate Jobs Found", str(stats.get('jobs_duplicate', 0)))  # Added this line
-    table.add_row("Jobs with Details", str(stats.get('jobs_detailed', 0)))
-    table.add_row("Jobs Filtered Out", str(stats.get('jobs_filtered', 0)))
-    table.add_row("Jobs Stored", str(stats.get('jobs_stored', 0)))
+    # Add rows with logging
+    urls_processed = stats.get('urls_processed', 0)
+    total_jobs = stats.get('jobs_found', 0)
+    duplicate_jobs = stats.get('jobs_duplicate', 0)
+    filtered_jobs = stats.get('jobs_filtered_out', 0)
+    stored_jobs = stats.get('jobs_stored', 0)
+    
+    table.add_row("URLs Processed", str(urls_processed))
+    table.add_row("Total Jobs Found", str(total_jobs))
+    table.add_row("Duplicate Jobs Found", str(duplicate_jobs))
+    table.add_row("Jobs Filtered Out", str(filtered_jobs))
+    table.add_row("Jobs Stored", str(stored_jobs))
+    
+    # Log the final job processing breakdown
+    logger.info(f"Job processing breakdown in summary - "
+               f"Total: {total_jobs}, Filtered: {filtered_jobs}, "
+               f"Duplicates: {duplicate_jobs}, Stored: {stored_jobs}")
     
     errors_count = stats.get('errors', 0)
     error_style = "bold red" if errors_count > 0 else ""

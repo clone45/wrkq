@@ -17,7 +17,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 import logging
 
 from ..interfaces.progress import ProgressDisplay
-from ..events import *  # Import all event constants
+from ..events import EventType
 from .components import create_stats_table, create_events_panel, create_summary_table
 from .event_handlers import EventHandlers
 
@@ -35,11 +35,6 @@ class RichProgressDisplay(ProgressDisplay):
     def __init__(self, event_bus, refresh_per_second: int = 10, max_recent_events: int = 50):
         """
         Initialize the progress display.
-        
-        Args:
-            event_bus: Event bus to subscribe to for updates
-            refresh_per_second: How often to refresh the display
-            max_recent_events: Maximum number of recent events to show
         """
         self.event_bus = event_bus
         self.refresh_per_second = refresh_per_second
@@ -50,35 +45,37 @@ class RichProgressDisplay(ProgressDisplay):
         self.stats = {
             'urls_total': 0,
             'urls_processed': 0,
-            'jobs_found': 0,       # Total unique jobs identified by searcher across all URLs
-            'jobs_duplicate': 0,   # Total duplicate jobs found (new field)
-            'jobs_detailed': 0,    # Total jobs for which details were successfully fetched
-            'jobs_filtered': 0,    # Total jobs filtered out by the filterer
-            'jobs_stored': 0,      # Total jobs successfully passed to storer (basic info stored)
+            'jobs_found': 0,
+            'jobs_duplicate': 0,
+            'jobs_detailed': 0,
+            'jobs_filtered': 0,
+            'jobs_stored': 0,
             'errors': 0,
-            'start_time': time.time(), # Set initial start time here
+            'start_time': time.time(),
             'current_url': '',
             'current_job': '',
             'status_message': 'Initializing...'
         }
         
-        # Recent events tracking - keep only the most recent events
-        self.recent_events: List[Tuple[str, str, str]] = []  # (timestamp, event_type, message)
+        # Recent events tracking
+        self.recent_events: List[Tuple[str, str, str]] = []
         
-        # Initialize event handlers
-        self.event_handlers = EventHandlers(
-            stats_dict=self.stats,
-            update_callback=self.update,       # This is RichProgressDisplay.update
-            begin_phase_callback=self.begin_phase,
-            update_phase_callback=self.update_phase,
-            add_event_callback=self.add_event
-        )
-        
-        # Initialize progress bars
+        # Initialize progress bars FIRST
         self._init_progress_bars()
         
+        # THEN initialize event handlers with the progress bars
+        self.event_handlers = EventHandlers(
+            stats_dict=self.stats,
+            update_callback=self.update,
+            begin_phase_callback=self.begin_phase,
+            update_phase_callback=self.update_phase,
+            add_event_callback=self.add_event,
+            job_progress=self.job_progress,
+            current_operation_id_getter=lambda: self.current_operation_id
+        )
+        
         # Create layout
-        self._init_layout() # Call this before initialize() needs it
+        self._init_layout()
         
         # Live display instance
         self.live: Optional[Live] = None
@@ -141,38 +138,38 @@ class RichProgressDisplay(ProgressDisplay):
     def _subscribe_to_events(self) -> None:
         """Subscribe to relevant events from the event bus."""
         # Pipeline events
-        self.event_bus.subscribe(PIPELINE_STARTED, self.event_handlers.handle_pipeline_started)
-        self.event_bus.subscribe(PIPELINE_ERROR, self.event_handlers.handle_error)
-        self.event_bus.subscribe(PIPELINE_COMPLETED, self.event_handlers.handle_pipeline_completed)
-        self.event_bus.subscribe(URL_PROCESSING_STARTED, self.event_handlers.handle_url_started)
-        self.event_bus.subscribe(URL_PROCESSING_COMPLETED, self.event_handlers.handle_url_completed)
+        self.event_bus.subscribe(EventType.PIPELINE_STARTED, self.event_handlers.handle_pipeline_started)
+        self.event_bus.subscribe(EventType.PIPELINE_ERROR, self.event_handlers.handle_error)
+        self.event_bus.subscribe(EventType.PIPELINE_COMPLETED, self.event_handlers.handle_pipeline_completed)
+        self.event_bus.subscribe(EventType.URL_PROCESSING_STARTED, self.event_handlers.handle_url_started)
+        self.event_bus.subscribe(EventType.URL_PROCESSING_COMPLETED, self.event_handlers.handle_url_completed)
         
         # Search events
-        self.event_bus.subscribe(SEARCH_STARTED, self.event_handlers.handle_search_started)
-        self.event_bus.subscribe(SEARCH_PAGE_FETCHED, self.event_handlers.handle_search_page)
-        self.event_bus.subscribe(SEARCH_COMPLETED, self.event_handlers.handle_search_completed)
-        self.event_bus.subscribe(JOB_FOUND, self.event_handlers.handle_job_found)
-        self.event_bus.subscribe(JOB_DUPLICATE_FOUND, self.event_handlers.handle_job_duplicate_found)
+        self.event_bus.subscribe(EventType.SEARCH_STARTED, self.event_handlers.handle_search_started)
+        self.event_bus.subscribe(EventType.SEARCH_PAGE_FETCHED, self.event_handlers.handle_search_page)
+        self.event_bus.subscribe(EventType.SEARCH_COMPLETED, self.event_handlers.handle_search_completed)
+        self.event_bus.subscribe(EventType.JOB_FOUND, self.event_handlers.handle_job_found)
+        self.event_bus.subscribe(EventType.JOB_DUPLICATE_FOUND, self.event_handlers.handle_job_duplicate_found)
         
         # Detail events
-        self.event_bus.subscribe(DETAIL_FETCHING_STARTED, self.event_handlers.handle_detail_started)
-        self.event_bus.subscribe(JOB_DETAILS_FETCHED, self.event_handlers.handle_job_details)
-        self.event_bus.subscribe(DETAIL_FETCHING_COMPLETED, self.event_handlers.handle_detail_completed)
+        self.event_bus.subscribe(EventType.DETAIL_FETCHING_STARTED, self.event_handlers.handle_detail_started)
+        self.event_bus.subscribe(EventType.JOB_DETAILS_FETCHED, self.event_handlers.handle_job_details)
+        self.event_bus.subscribe(EventType.DETAIL_FETCHING_COMPLETED, self.event_handlers.handle_detail_completed)
         
         # Filter events
-        self.event_bus.subscribe(JOB_KEPT, self.event_handlers.handle_job_kept)
-        self.event_bus.subscribe(JOB_FILTERED, self.event_handlers.handle_job_filtered)
+        self.event_bus.subscribe(EventType.JOB_KEPT, self.event_handlers.handle_job_kept)
+        self.event_bus.subscribe(EventType.JOB_FILTERED, self.event_handlers.handle_job_filtered)
         
         # Storage events
-        self.event_bus.subscribe(JOB_BASIC_STORED, self.event_handlers.handle_job_basic_stored)
-        self.event_bus.subscribe(JOB_DETAILS_STORED, self.event_handlers.handle_job_details_stored)
-        self.event_bus.subscribe(JOB_MARKED_FILTERED, self.event_handlers.handle_job_marked_filtered)
+        self.event_bus.subscribe(EventType.JOB_BASIC_STORED, self.event_handlers.handle_job_basic_stored)
+        self.event_bus.subscribe(EventType.JOB_DETAILS_STORED, self.event_handlers.handle_job_details_stored)
+        self.event_bus.subscribe(EventType.JOB_MARKED_FILTERED, self.event_handlers.handle_job_marked_filtered)
         
         # Error events
-        self.event_bus.subscribe(SEARCH_ERROR, self.event_handlers.handle_error)
-        self.event_bus.subscribe(DETAIL_ERROR, self.event_handlers.handle_error)
-        self.event_bus.subscribe(FILTER_ERROR, self.event_handlers.handle_error)
-        self.event_bus.subscribe(STORAGE_ERROR, self.event_handlers.handle_error)
+        self.event_bus.subscribe(EventType.SEARCH_ERROR, self.event_handlers.handle_error)
+        self.event_bus.subscribe(EventType.DETAIL_ERROR, self.event_handlers.handle_error)
+        self.event_bus.subscribe(EventType.FILTER_ERROR, self.event_handlers.handle_error)
+        self.event_bus.subscribe(EventType.STORAGE_ERROR, self.event_handlers.handle_error)
     
     def update(self, **new_stats_to_display: Any) -> None:
         """

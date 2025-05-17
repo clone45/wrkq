@@ -1,182 +1,312 @@
-# File: harvest/core/linkedin_searcher.py
+# File: harvest/core/linkedin_searcher.py (Updated)
 
 import logging
 import time
 import random
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse # For URL manipulation
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import json
+from pathlib import Path
+from urllib.parse import urljoin, urlparse, parse_qs
 
 from ..interfaces.searcher import SearcherInterface, SearchOptions
 from ..interfaces.event_bus import EventBus as EventBusInterface
-from ..events import SEARCH_STARTED, JOB_FOUND, SEARCH_COMPLETED, SEARCH_ERROR, SEARCH_PAGE_FETCHED
-from ..utils import http_utils, html_parser # Use our new utilities
-from ..errors import NetworkError, AuthenticationError, ParseError # Our custom errors
+from ..events import EventType
+from ..errors import NetworkError, AuthenticationError, ParseError
+from ..utils import http_utils # For any utility functions you might want to keep
 
 logger = logging.getLogger(__name__)
 
 class LinkedInSearcher(SearcherInterface):
     """
-    Searches LinkedIn for job postings based on a given URL and options.
-    Attempts to use LinkedIn's 'seeMoreJobPostings' API endpoint,
-    and can fall back to parsing HTML if necessary (though API is preferred).
+    Searches LinkedIn for job postings using the Voyager API.
     """
 
-    def __init__(self, event_bus: EventBusInterface):
+    def __init__(self, event_bus: EventBusInterface, http_client=None):
         self.event_bus = event_bus
+        self.http_client = http_client
         logger.info("LinkedInSearcher initialized.")
 
-    def _extract_base_search_params(self, search_url: str) -> Dict[str, str]:
-        """
-        Extracts key parameters from the initial search URL relevant for API calls.
-        Adapted from your old extract_query_params and important_params logic.
-        """
-        parsed_initial_url = urlparse(search_url)
-        query_params = {k: v[0] for k, v in parse_qs(parsed_initial_url.query).items()}
-        
-        # Parameters LinkedIn search API often uses
-        api_relevant_params = [
-            'keywords', 'location', 'geoId', 'f_TPR', 'f_WT', 'f_E', 
-            'f_JT', 'f_SB2', 'f_LF', 'f_I', 'f_CF', 'f_CP', 'f_CS', # Common filter params
-            'distance', 'sortBy', 'currentJobId', 'position', 'pageNum'
-        ]
-        
-        extracted_params: Dict[str, str] = {}
-        for param in api_relevant_params:
-            if param in query_params:
-                extracted_params[param] = query_params[param]
-        
-        # Ensure 'guestId' or similar session identifiers are NOT carried over
-        # if we intend to use a "guest" API or our own cookies.
-        # For 'seeMoreJobPostings', it often works without deep session state.
-        
-        logger.debug(f"Extracted base API parameters from '{search_url}': {extracted_params}")
-        return extracted_params
+    def _load_cookies(self, cookie_file_path: Path) -> Dict[str, str]:
+        """Load cookies from a JSON file."""
+        if not cookie_file_path.exists():
+            logger.error(f"Cookie file not found at: {cookie_file_path}")
+            return {}
 
-    def _build_api_url(self, base_api_endpoint: str, params: Dict[str, str], start: int, count: int) -> str:
-        """
-        Builds a paginated URL for LinkedIn's 'seeMoreJobPostings' API.
-        Adapted from your old build_search_url.
-        """
-        api_call_params = params.copy() # Start with base search params
-        api_call_params['start'] = str(start)
-        api_call_params['count'] = str(count) # LinkedIn typically uses 'count', not 'jobs_per_page' for this API
-        # api_call_params['guest'] = 'true' # Often needed for this endpoint
+        try:
+            with open(cookie_file_path, 'r', encoding='utf-8') as f:
+                cookies_data = json.load(f)
+                
+            cookies_dict = {}
+            if isinstance(cookies_data, list):
+                for cookie in cookies_data:
+                    if isinstance(cookie, dict) and 'name' in cookie and 'value' in cookie:
+                        cookies_dict[cookie['name']] = cookie['value']
+            elif isinstance(cookies_data, dict):
+                cookies_dict = cookies_data
+                
+            logger.info(f"Loaded {len(cookies_dict)} cookies")
+            return cookies_dict
+        except Exception as e:
+            logger.error(f"Error loading cookies from {cookie_file_path}: {e}")
+            return {}
 
-        # The base_api_endpoint should not have query params.
-        # We construct a new query string.
-        parsed_endpoint = urlparse(base_api_endpoint)
-        new_query = urlencode(api_call_params, doseq=True)
+    def _extract_keyword_and_location(self, search_url: str) -> tuple:
+        """Extract keywords and location from a LinkedIn search URL."""
+        parsed_url = urlparse(search_url)
+        query_params = parse_qs(parsed_url.query)
         
-        api_url = urlunparse((
-            parsed_endpoint.scheme,
-            parsed_endpoint.netloc,
-            parsed_endpoint.path,
-            parsed_endpoint.params, # Usually empty
-            new_query,
-            parsed_endpoint.fragment # Usually empty
-        ))
-        logger.debug(f"Constructed API URL: {api_url}")
-        return api_url
+        keywords = query_params.get('keywords', [''])[0]
+        location = query_params.get('location', [''])[0]
+        geo_id = query_params.get('geoId', ['90000084'])[0]  # Default to San Francisco if not found
+        
+        return keywords, location, geo_id
 
     def search(self, search_url: str, options: Optional[SearchOptions] = None) -> List[Dict[str, Any]]:
-        if not options: # Should ideally be provided by PipelineConfig
-            options = SearchOptions() 
+        """
+        Search LinkedIn for jobs using the provided search URL.
+        
+        Args:
+            search_url: The LinkedIn search URL to use
+            options: Optional search configuration
+            
+        Returns:
+            List of job data dictionaries
+        """
+        if not options:
+            options = SearchOptions()
             logger.warning("LinkedInSearcher: No SearchOptions provided, using defaults.")
 
-        self.event_bus.publish(SEARCH_STARTED, url=search_url)
-        logger.info(f"Starting LinkedIn job search for URL: {search_url}")
-        logger.info(f"Search options: Max Pages={options.max_pages}, Jobs/Page Attempt={options.jobs_per_page}, Delay={options.delay_between_requests}s")
+        self.event_bus.publish(EventType.SEARCH_STARTED, url=search_url)
+        logger.info(f"Starting LinkedIn job search with URL: {search_url}")
 
-        all_found_jobs: List[Dict[str, Any]] = []
+        # Validate URL
+        try:
+            parsed_url = urlparse(search_url)
+            if not parsed_url.netloc or "linkedin.com" not in parsed_url.netloc:
+                error_msg = f"Invalid LinkedIn URL: {search_url}"
+                logger.error(error_msg)
+                self.event_bus.publish(EventType.SEARCH_ERROR, error=error_msg, url=search_url)
+                return []
+        except Exception as e:
+            error_msg = f"Failed to parse URL '{search_url}': {e}"
+            logger.error(error_msg)
+            self.event_bus.publish(EventType.SEARCH_ERROR, error=error_msg, url=search_url)
+            return []
+
+        all_found_jobs = []
         
-        # LinkedIn's "guest" API endpoint for search results (often HTML containing JSON or just JSON)
-        # This might need adjustment based on current LinkedIn structures.
-        # The /jobs-guest/ part is key for unauthenticated/less-strict access.
-        base_api_endpoint = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-        # base_api_endpoint = "https://www.linkedin.com/voyager/api/search/hits" # More complex, needs auth
+        # Load cookies
+        cookie_file = Path(options.cookie_file) if options.cookie_file else None
+        cookies = self._load_cookies(cookie_file) if cookie_file else {}
+        
+        if 'li_at' not in cookies or 'JSESSIONID' not in cookies:
+            error_msg = "Missing required LinkedIn cookies (li_at and JSESSIONID)"
+            logger.error(error_msg)
+            self.event_bus.publish(EventType.SEARCH_ERROR, error=error_msg, url=search_url)
+            return []
+            
+        logger.info(f"Loaded cookies successfully: {', '.join(cookies.keys())}")
+        
+        # Extract search parameters from URL
+        keywords, location, geo_id = self._extract_keyword_and_location(search_url)
+        logger.info(f"Extracted search parameters - Keywords: '{keywords}', Location: '{location}', GeoId: '{geo_id}'")
 
-        base_params = self._extract_base_search_params(search_url)
-        if not base_params.get('keywords') and not base_params.get('geoId') and not base_params.get('location'):
-             logger.warning(f"Initial URL '{search_url}' lacks common search params (keywords, geoId, location). API calls may be less effective.")
-
-
+        # Search through pages
         for page_num in range(options.max_pages):
             start_index = page_num * options.jobs_per_page
             
-            api_url = self._build_api_url(base_api_endpoint, base_params, start_index, options.jobs_per_page)
-
-            logger.info(f"Fetching page {page_num + 1}/{options.max_pages} using API URL: {api_url}")
-            self.event_bus.publish(SEARCH_PAGE_FETCHED, page=(page_num + 1), total_pages=options.max_pages, url=api_url)
-
+            # Build URL for current page
+            url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+            
+            # Build query parameters
+            query_params = {
+                "keywords": keywords,
+                "location": location,
+                "geoId": geo_id,
+                "start": start_index,
+                "count": options.jobs_per_page,
+                "f_TPR": "r86400",  # Last 24 hours
+                "f_WT": "2",  # Remote jobs
+                "guest": "true"
+            }
+            
+            # Add any additional parameters from the original URL
+            original_params = parse_qs(parsed_url.query)
+            for key, values in original_params.items():
+                if key not in query_params and key not in ['start', 'count']:
+                    query_params[key] = values[0]
+            
+            # Build the URL with parameters
+            param_strings = []
+            for key, value in query_params.items():
+                param_strings.append(f"{key}={value}")
+            
+            full_url = f"{url}?{'&'.join(param_strings)}"
+            
+            # Fetch the page
+            logger.info(f"Fetching page {page_num + 1}/{options.max_pages} from: {full_url}")
+            self.event_bus.publish(EventType.SEARCH_PAGE_FETCHED, page=(page_num + 1), total_pages=options.max_pages, url=full_url)
+            
             try:
-                response = http_utils.fetch_page_content(
-                    url=api_url,
-                    cookie_file=options.cookie_file, # Pass cookie file from options
-                    max_retries=3, # Could also come from options
-                    retry_delay=5, # Could also come from options
-                    verbose_logging=True # Or tie to a global debug flag
-                )
-
-                if not response:
-                    logger.error(f"Failed to fetch content for page {page_num + 1} from {api_url}. Stopping search for this URL.")
-                    self.event_bus.publish(SEARCH_ERROR, error="Failed to fetch page content", url=api_url, page=page_num+1)
-                    break # Stop processing this search_url
-
-                page_jobs: List[Dict[str, Any]] = []
-                content_type = response.headers.get("Content-Type", "").lower()
-
-                if "application/json" in content_type or response.text.strip().startswith(("{", "[")):
-                    try:
-                        logger.debug(f"Attempting to parse page {page_num + 1} response as JSON.")
-                        # The html_parser's parse_search_results_api_json expects dict or str
-                        page_jobs = html_parser.parse_search_results_api_json(response.text)
-                        logger.info(f"Parsed {len(page_jobs)} jobs from JSON response on page {page_num + 1}.")
-                    except ParseError as pe:
-                        logger.warning(f"Could not parse JSON from {api_url} (Page {page_num+1}), trying as HTML. Error: {pe}")
-                        # Fall through to HTML parsing if JSON parsing fails structurally
-                        page_jobs = html_parser.parse_search_results_html(response.text)
-                        logger.info(f"Parsed {len(page_jobs)} jobs from HTML (after JSON parse attempt failed) on page {page_num + 1}.")
-                    except Exception as e_json: # Catch other JSON processing errors
-                        logger.error(f"Unexpected error processing JSON from {api_url}: {e_json}", exc_info=True)
-                        self.event_bus.publish(SEARCH_ERROR, error=f"JSON processing error: {e_json}", url=api_url, page=page_num+1)
-                        continue # Skip to next page or break
-                else: # Assume HTML
-                    logger.debug(f"Parsing page {page_num + 1} response as HTML (Content-Type: {content_type}).")
-                    page_jobs = html_parser.parse_search_results_html(response.text)
-                    logger.info(f"Parsed {len(page_jobs)} jobs from HTML response on page {page_num + 1}.")
-
-                if not page_jobs and page_num > 0 : # If a subsequent page returns no jobs, we might be done.
-                    logger.info(f"No jobs found on page {page_num + 1}. Assuming end of results for this search query.")
-                    break 
+                # Use curl-cffi for requests
+                from curl_cffi import requests
                 
-                for job_data in page_jobs:
-                    # Ensure essential fields like job_id, title, company, url are present or defaulted
-                    # The parser should ideally handle this, but a check here is good.
-                    # Add a timestamp for when it was found by this harvester
-                    job_data['harvested_at'] = datetime.now().isoformat()
-                    job_data['source_search_url'] = search_url # Keep track of original user-provided search URL
-                    
-                    self.event_bus.publish(JOB_FOUND, **job_data)
-                    all_found_jobs.append(job_data)
-
-                # Respectful delay
-                if page_num < options.max_pages - 1 and page_jobs: # Only delay if there are more pages to fetch and current page had jobs
-                    time.sleep(options.delay_between_requests * random.uniform(0.8, 1.2))
-
-            except (NetworkError, AuthenticationError) as net_auth_err:
-                logger.error(f"Search for {search_url} failed due to: {net_auth_err}", exc_info=True)
-                self.event_bus.publish(SEARCH_ERROR, error=str(net_auth_err), url=api_url, page=page_num+1, error_type=type(net_auth_err).__name__)
-                break # Stop processing this search_url on critical network/auth errors
-            except ParseError as pe: # Catch ParseErrors from html_parser
-                logger.error(f"Search for {search_url} failed due to parsing error on page {page_num+1}: {pe}", exc_info=True)
-                self.event_bus.publish(SEARCH_ERROR, error=str(pe), url=api_url, page=page_num+1, error_type="ParseError")
-                # Decide whether to break or continue to next page. Let's continue for now.
+                response = requests.get(
+                    full_url,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Referer': 'https://www.linkedin.com/',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'TE': 'Trailers'
+                    },
+                    cookies=cookies,
+                    impersonate="chrome110",
+                    timeout=30,
+                    allow_redirects=True
+                )
+                
+                logger.info(f"Response status: {response.status_code}")
+                logger.info(f"Response headers: {dict(response.headers)}")
+                
+                if response.status_code != 200:
+                    error_msg = f"API request failed: Status {response.status_code}"
+                    logger.error(error_msg)
+                    logger.error(f"Response content: {response.text[:500]}...")  # Log first 500 chars of error response
+                    self.event_bus.publish(EventType.SEARCH_ERROR, error=error_msg, url=full_url, page=page_num+1)
+                    break
+                
+                # Parse response as HTML
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Find all job cards
+                job_cards = soup.select('.base-search-card')
+                logger.info(f"Found {len(job_cards)} job cards on page {page_num + 1}")
+                
+                # Process each job card
+                for card in job_cards:
+                    try:
+                        job_data = {}
+                        
+                        # Get job ID from data-entity-urn attribute
+                        entity_urn = card.get('data-entity-urn', '')
+                        if entity_urn:
+                            job_data['job_id'] = entity_urn.split(':')[-1]
+                        
+                        # Get job title
+                        title_elem = card.select_one('.base-search-card__title')
+                        if title_elem:
+                            job_data['title'] = title_elem.get_text(strip=True)
+                        
+                        # Get company name
+                        company_elem = card.select_one('.base-search-card__subtitle')
+                        if company_elem:
+                            job_data['company'] = company_elem.get_text(strip=True)
+                        
+                        # Get location
+                        location_elem = card.select_one('.job-search-card__location')
+                        if location_elem:
+                            job_data['location'] = location_elem.get_text(strip=True)
+                        
+                        # Get job URL
+                        link_elem = card.select_one('a.base-card__full-link')
+                        if link_elem:
+                            job_data['url'] = link_elem.get('href', '')
+                        
+                        # Get listed date
+                        time_elem = card.select_one('time')
+                        if time_elem:
+                            job_data['listed_at'] = time_elem.get('datetime')
+                        
+                        # Only add jobs that have at least an ID and either a title or URL
+                        if job_data.get('job_id') and (job_data.get('title') or job_data.get('url')):
+                            job_data['harvested_at'] = datetime.now().isoformat()
+                            job_data['source_search_url'] = search_url
+                            all_found_jobs.append(job_data)
+                            self.event_bus.publish(EventType.JOB_FOUND, **job_data)
+                            
+                    except Exception as e:
+                        logger.warning(f"Error processing job card: {e}")
+                        continue
+                
+                # Stop if no more jobs found
+                if len(job_cards) == 0:
+                    logger.info(f"No more jobs found on page {page_num + 1}. Stopping search.")
+                    break
+                
+                # Delay before next page
+                if page_num < options.max_pages - 1 and len(job_cards) > 0:
+                    delay = options.delay_between_requests * random.uniform(0.8, 1.2)
+                    logger.info(f"Waiting {delay:.2f} seconds before next request")
+                    time.sleep(delay)
+                
             except Exception as e:
-                logger.critical(f"An unexpected error occurred during search for {search_url} on page {page_num + 1}: {e}", exc_info=True)
-                self.event_bus.publish(SEARCH_ERROR, error=f"Unexpected: {str(e)}", url=api_url, page=page_num+1, error_type="CriticalSearchError")
-                break # Stop on truly unexpected errors
-
-        logger.info(f"Search completed for {search_url}. Total jobs found: {len(all_found_jobs)} across processed pages.")
-        self.event_bus.publish(SEARCH_COMPLETED, jobs_found=len(all_found_jobs), original_search_url=search_url)
+                error_msg = f"Error during search: {e}"
+                logger.error(error_msg, exc_info=True)
+                self.event_bus.publish(EventType.SEARCH_ERROR, error=error_msg, url=full_url, page=page_num+1)
+                break
+        
+        logger.info(f"Search completed for {search_url}. Total jobs found: {len(all_found_jobs)}")
+        self.event_bus.publish(EventType.SEARCH_COMPLETED, jobs_found=len(all_found_jobs), original_search_url=search_url)
         return all_found_jobs
+
+    def _extract_text(self, text_view):
+        """Extract text from LinkedIn's TextView object format."""
+        if not text_view:
+            return ""
+        
+        if isinstance(text_view, dict):
+            return text_view.get('text', '')
+        
+        return str(text_view)
+
+    def _extract_timestamp(self, footer_items):
+        """Extract timestamp from LinkedIn's JobPostingCardFooterItem objects."""
+        if not footer_items:
+            logger.warning("No footer items found for timestamp extraction")
+            return None
+            
+        for item in footer_items:
+            if not isinstance(item, dict):
+                logger.warning(f"Footer item is not a dictionary: {type(item)}")
+                continue
+                
+            if item.get('type') == 'LISTED_DATE':
+                if 'timeAt' not in item:
+                    logger.warning("Found LISTED_DATE item but missing timeAt field")
+                    continue
+                    
+                timestamp = item.get('timeAt')
+                try:
+                    date_str = datetime.fromtimestamp(timestamp / 1000.0).strftime('%Y-%m-%d')
+                    return date_str
+                except Exception as e:
+                    logger.error(f"Failed to parse timestamp {timestamp}: {str(e)}")
+                    return None
+                    
+        logger.warning("No LISTED_DATE item found in footer items")
+        return None
+
+    def _add_params_to_url(self, base_url: str, params: Dict[str, Any]) -> str:
+        """Add query parameters to URL."""
+        parsed = urlparse(base_url)
+        existing_params = parse_qs(parsed.query)
+        
+        # Merge existing and new params
+        all_params = {**existing_params, **params}
+        
+        # Rebuild query string
+        query_parts = []
+        for key, value in all_params.items():
+            if isinstance(value, list):
+                value = value[0]
+            query_parts.append(f"{key}={value}")
+            
+        new_query = "&".join(query_parts)
+        
+        # Reconstruct URL
+        return parsed._replace(query=new_query).geturl()

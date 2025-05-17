@@ -4,14 +4,16 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
 
 from .interfaces.pipeline import PipelineConfig # Assuming these are now primarily defined/imported here
 from .interfaces.searcher import SearchOptions
 from .interfaces.detailer import DetailOptions
 from .interfaces.filterer import FilterOptions
 from .interfaces.storer import StorageOptions
+from .interfaces.job_iterator import JobIteratorOptions
+from .interfaces.preprocessor import PreProcessorOptions
+from .interfaces.postprocessor import PostProcessorOptions
 from .errors import ConfigError # Import your custom ConfigError
 
 logger = logging.getLogger(__name__)
@@ -38,13 +40,94 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT_DIR / "output" / "harvest_results"
 DEFAULT_LOGS_DIR = PROJECT_ROOT_DIR / "logs"
 
 DEFAULT_COOKIE_FILE = HARVEST_PACKAGE_DIR / "private" / "www.linkedin.com_cookies.json" 
-DEFAULT_DB_PATH = PROJECT_ROOT_DIR / "data" / "harvested_jobs.sqlite"
+# DEFAULT_DB_PATH = PROJECT_ROOT_DIR / "data" / "harvested_jobs.sqlite"
 
 DEFAULT_FILTERS_DIR_NAME = "filters" # Subdirectory within config_dir
 DEFAULT_WORKFLOWS_FILE_NAME = "workflows.json" # File within config_dir
 DEFAULT_TITLE_FILTERS_FILE_NAME = "title_filters.json"
 DEFAULT_COMPANY_FILTERS_FILE_NAME = "company_filters.json"
 
+DEFAULT_DB_PATH = Path("C:/Code/wrkq/job_tracker/db/data/sqlite.db")
+
+
+class DBConnectionProvider:
+    """
+    Singleton provider for database connections to ensure consistency
+    across all components that need database access.
+    """
+    _instance = None
+    _connection = None
+    _db_path = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DBConnectionProvider, cls).__new__(cls)
+        return cls._instance
+    
+    def initialize(self, db_path) -> None:
+        """Initialize the database connection."""
+        from .database.connection import SQLiteDBConnection  # Import here to avoid circular imports
+        
+        db_path = Path(db_path) if isinstance(db_path, str) else db_path
+        
+        if self._connection is not None:
+            logger.warning(f"Database connection already initialized. Reinitializing with: {db_path}")
+            self._connection.close()
+        
+        logger.info(f"Initializing database connection with: {db_path}")
+        try:
+            self._connection = SQLiteDBConnection(db_path)
+            self._db_path = db_path
+            # Test the connection 
+            self._connection.execute("SELECT 1")
+            logger.info("Database connection successfully initialized and tested")
+        except Exception as e:
+            logger.error(f"Failed to initialize database connection: {e}", exc_info=True)
+            self._connection = None
+            raise
+        
+    def get_connection(self):
+        """Get the shared database connection."""
+        if self._connection is None:
+            if self._db_path is not None:
+                # Try to reinitialize if we have a path but lost the connection
+                logger.warning("Database connection was lost. Attempting to reconnect.")
+                try:
+                    self.initialize(self._db_path)
+                except Exception as e:
+                    logger.error(f"Failed to reconnect to database: {e}")
+                    return None
+            else:
+                logger.error("Database connection requested but not initialized!")
+                return None
+        return self._connection
+    
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+            logger.info("Database connection closed")
+
+
+# Create a global instance of the provider
+db_provider = DBConnectionProvider()
+
+def initialize_db_connection(db_path: Optional[Path] = None) -> None:
+    """
+    Initialize the global database connection.
+    Args:
+        db_path: Path to the database file. If None, uses DEFAULT_DB_PATH.
+    """
+    db_provider.initialize(db_path or DEFAULT_DB_PATH)
+
+def get_db_connection():
+    """
+    Get the global database connection.
+    Returns:
+        The SQLite database connection or None if not initialized.
+    """
+    return db_provider.get_connection()
 
 # --- Configuration Loading Functions (adapted from your old config_loader.py) ---
 
@@ -112,8 +195,7 @@ def load_pipeline_config(
     cookie_file_path: Optional[Path] = None,
     db_file_path: Optional[Path] = None,
     output_dir_path: Optional[Path] = None,
-    # Add more overrides here as needed from command-line args
-    cmd_line_search_options: Optional[Dict[str, Any]] = None, # e.g., from argparse
+    cmd_line_search_options: Optional[Dict[str, Any]] = None,
     cmd_line_detail_options: Optional[Dict[str, Any]] = None,
     cmd_line_filter_options: Optional[Dict[str, Any]] = None,
     cmd_line_storage_options: Optional[Dict[str, Any]] = None,
@@ -128,18 +210,41 @@ def load_pipeline_config(
     cfg_dir = config_dir_path if config_dir_path else DEFAULT_CONFIG_DIR
     
     # --- SearchOptions ---
-    # Start with defaults defined in the SearchOptions dataclass
     search_opts = SearchOptions()
-    # Override with command-line args if provided
     if cmd_line_search_options:
         for key, value in cmd_line_search_options.items():
             if hasattr(search_opts, key) and value is not None:
                 setattr(search_opts, key, value)
-    # Set cookie file path (priority: cmd_line > func_param > default)
     search_opts.cookie_file = str(cookie_file_path or getattr(search_opts, 'cookie_file', None) or DEFAULT_COOKIE_FILE)
-    # Set output_dir (used by mock searcher, real searcher might not need it directly)
     search_opts.output_dir = str(output_dir_path or getattr(search_opts, 'output_dir', None) or DEFAULT_OUTPUT_DIR / "search_temp")
 
+    # --- JobIteratorOptions ---
+    iterator_opts = JobIteratorOptions()
+
+    # --- PreProcessorOptions ---
+    preprocessor_opts = PreProcessorOptions()
+
+    # Set default filter paths if they exist
+    default_title_filters = cfg_dir / DEFAULT_FILTERS_DIR_NAME / DEFAULT_TITLE_FILTERS_FILE_NAME
+    default_company_filters = cfg_dir / DEFAULT_FILTERS_DIR_NAME / DEFAULT_COMPANY_FILTERS_FILE_NAME
+
+    if default_title_filters.exists():
+        preprocessor_opts.title_filters_path = str(default_title_filters)
+        logger.info(f"Using default title filters: {default_title_filters}")
+
+    if default_company_filters.exists():
+        preprocessor_opts.company_filters_path = str(default_company_filters)
+        logger.info(f"Using default company filters: {default_company_filters}")
+
+    # Override with specific paths if provided
+    if title_filters_file_name:
+        preprocessor_opts.title_filters_path = str(cfg_dir / DEFAULT_FILTERS_DIR_NAME / title_filters_file_name)
+    if company_filters_file_name:
+        preprocessor_opts.company_filters_path = str(cfg_dir / DEFAULT_FILTERS_DIR_NAME / company_filters_file_name)
+    if cmd_line_filter_options:
+        for key, value in cmd_line_filter_options.items():
+            if hasattr(preprocessor_opts, key) and value is not None:
+                setattr(preprocessor_opts, key, value)
 
     # --- DetailOptions ---
     detail_opts = DetailOptions()
@@ -150,53 +255,42 @@ def load_pipeline_config(
     detail_opts.cookie_file = str(cookie_file_path or getattr(detail_opts, 'cookie_file', None) or DEFAULT_COOKIE_FILE)
     detail_opts.output_dir = str(output_dir_path or getattr(detail_opts, 'output_dir', None) or DEFAULT_OUTPUT_DIR / "detail_temp")
 
-
-    # --- FilterOptions ---
-    # Start with defaults
-    filter_opts = FilterOptions()
-    # Determine paths for filter files
-    title_filters_name = title_filters_file_name or DEFAULT_TITLE_FILTERS_FILE_NAME
-    company_filters_name = company_filters_file_name or DEFAULT_COMPANY_FILTERS_FILE_NAME
-    
-    # The actual loading of filter *rules* happens inside the JobFilterer component,
-    # which will use these paths. Here, we just set the paths.
-    filter_opts.title_filters_path = str(cfg_dir / DEFAULT_FILTERS_DIR_NAME / title_filters_name)
-    filter_opts.company_filters_path = str(cfg_dir / DEFAULT_FILTERS_DIR_NAME / company_filters_name)
-    
-    if cmd_line_filter_options:
-        for key, value in cmd_line_filter_options.items():
-            if hasattr(filter_opts, key) and value is not None:
-                setattr(filter_opts, key, value)
-                # If paths are overridden, ensure they are absolute or resolved correctly
-                if key.endswith("_path") and value:
-                    setattr(filter_opts, key, str(Path(value).resolve()))
-
+    # --- PostProcessorOptions ---
+    postprocessor_opts = PostProcessorOptions()
 
     # --- StorageOptions ---
-    storage_opts = StorageOptions(database_path=str(DEFAULT_DB_PATH)) # Default path is mandatory in dataclass
+    storage_opts = StorageOptions(database_path=str(DEFAULT_DB_PATH))
     if cmd_line_storage_options:
         for key, value in cmd_line_storage_options.items():
             if hasattr(storage_opts, key) and value is not None:
                 setattr(storage_opts, key, value)
-    # Override db_file_path
     storage_opts.database_path = str(db_file_path or getattr(storage_opts, 'database_path', None) or DEFAULT_DB_PATH)
+
+    # Initialize the database connection
+    db_path = db_file_path or DEFAULT_DB_PATH
+    try:
+        initialize_db_connection(db_path)
+        logger.info(f"Database connection initialized with {db_path}")
+    except Exception as e:
+        logger.error(f"Failed to initialize database connection: {e}")
+        # Continue without failing - components will need to handle missing connection
 
 
     # --- Construct Final PipelineConfig ---
     pipeline_config = PipelineConfig(
         search_options=search_opts,
+        iterator_options=iterator_opts,
+        preprocessor_options=preprocessor_opts,
         detail_options=detail_opts,
-        filter_options=filter_opts,
+        postprocessor_options=postprocessor_opts,
         storage_options=storage_opts
     )
 
-    # Create necessary default directories if they don't exist
+    # Create necessary default directories
     os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
     os.makedirs(DEFAULT_LOGS_DIR, exist_ok=True)
-    # Ensure parent of DB path exists if not in default output
     db_parent_dir = Path(pipeline_config.storage_options.database_path).parent
     os.makedirs(db_parent_dir, exist_ok=True)
-
 
     logger.info(f"Pipeline configuration loaded successfully: {pipeline_config}")
     return pipeline_config

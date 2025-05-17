@@ -3,20 +3,41 @@
 import time
 import random
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from ..interfaces.filterer import FiltererInterface, FilterOptions
 from ..interfaces.event_bus import EventBus as EventBusInterface
-from ..events import JOB_KEPT, JOB_FILTERED # Potentially FILTER_ERROR if config parsing fails
+from ..events import EventType
 # from ..errors import ConfigError
 
 logger = logging.getLogger(__name__)
 
 class MockFilterer(FiltererInterface):
-
+    """Mock implementation of FiltererInterface for testing."""
+    
     def __init__(self, event_bus: EventBusInterface):
         self.event_bus = event_bus
+        self.filtered_jobs = []
+        self.kept_jobs = []
         logger.info("MockFilterer initialized")
+
+    def filter_jobs(self, jobs: List[Dict[str, Any]], options: FilterOptions = None) -> List[Tuple[Dict[str, Any], str]]:
+        """Mock filtering jobs."""
+        filtered_results = []
+        
+        for job in jobs:
+            # Mock filtering logic - filter jobs with 'filter' in title
+            title = job.get('title', '').lower()
+            if 'filter' in title:
+                reason = "Title contains 'filter'"
+                self.filtered_jobs.append((job, reason))
+                filtered_results.append((job, reason))
+                self.event_bus.publish(EventType.JOB_FILTERED, reason=reason, **job)
+            else:
+                self.kept_jobs.append(job)
+                self.event_bus.publish(EventType.JOB_KEPT, **job)
+                
+        return filtered_results
 
     def filter_job_batch(self, jobs: List[Dict[str, Any]], options: Optional[FilterOptions] = None) -> List[Dict[str, Any]]:
         logger.info(f"MockFilterer: Starting to filter {len(jobs)} jobs with options: {options}")
@@ -42,10 +63,10 @@ class MockFilterer(FiltererInterface):
             
             if reason:
                 logger.debug(f"MockFilterer: Filtering out job ID '{job.get('job_id', 'N/A')}' - Reason: {reason}")
-                self.event_bus.publish(JOB_FILTERED, reason=reason, **job)
+                self.event_bus.publish(EventType.JOB_FILTERED, reason=reason, **job)
             else:
                 logger.debug(f"MockFilterer: Keeping job ID '{job.get('job_id', 'N/A')}'")
-                self.event_bus.publish(JOB_KEPT, **job)
+                self.event_bus.publish(EventType.JOB_KEPT, **job)
                 kept_jobs.append(job)
         
         logger.info(f"MockFilterer: Filtering completed. Kept {len(kept_jobs)} out of {len(jobs)} jobs.")

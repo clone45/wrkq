@@ -3,12 +3,12 @@
 import logging
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Pattern, Set
+from typing import List, Dict, Any, Optional, Pattern, Set, Tuple
 from datetime import datetime, timedelta
 
 from ..interfaces.filterer import FiltererInterface, FilterOptions
 from ..interfaces.event_bus import EventBus as EventBusInterface
-from ..events import JOB_KEPT, JOB_FILTERED, FILTER_ERROR # Make sure FILTER_ERROR is in events.py
+from ..events import EventType
 from ..config import load_filter_rules # Use the loader from harvest.config
 from ..errors import ConfigError, ParseError # Use your custom errors
 
@@ -21,6 +21,7 @@ class JobFilterer(FiltererInterface):
 
     def __init__(self, event_bus: EventBusInterface):
         self.event_bus = event_bus
+        self.filters = []
         logger.info("JobFilterer initialized.")
 
     def _compile_regex_patterns(self, patterns: List[str]) -> List[Pattern]:
@@ -34,7 +35,7 @@ class JobFilterer(FiltererInterface):
                 logger.error(msg)
                 # Optionally publish a FILTER_ERROR here or raise ConfigError
                 # For now, we'll log and skip the bad pattern.
-                self.event_bus.publish(FILTER_ERROR, error=msg, pattern=pattern_str, type="RegexCompileError")
+                self.event_bus.publish(EventType.FILTER_ERROR, error=msg, pattern=pattern_str, type="RegexCompileError")
         return compiled
 
     def _load_and_prepare_filters(self, file_path_str: Optional[str], filter_type_name: str) -> Dict[str, Any]:
@@ -75,11 +76,11 @@ class JobFilterer(FiltererInterface):
             logger.info(f"Loaded and prepared {filter_type_name} filters from {file_path}")
         except ConfigError as e: # ConfigError from load_filter_rules
             logger.error(f"Configuration error loading {filter_type_name} filters from {file_path}: {e}")
-            self.event_bus.publish(FILTER_ERROR, error=str(e), file_path=str(file_path), type="FilterFileLoadError")
+            self.event_bus.publish(EventType.FILTER_ERROR, error=str(e), file_path=str(file_path), type="FilterFileLoadError")
             # Continue without these filters if file is problematic
         except Exception as e:
             logger.error(f"Unexpected error preparing {filter_type_name} filters from {file_path}: {e}", exc_info=True)
-            self.event_bus.publish(FILTER_ERROR, error=str(e), file_path=str(file_path), type="FilterFileUnexpectedError")
+            self.event_bus.publish(EventType.FILTER_ERROR, error=str(e), file_path=str(file_path), type="FilterFileUnexpectedError")
 
         return prepared_filters
 
@@ -173,11 +174,113 @@ class JobFilterer(FiltererInterface):
 
             if filter_out:
                 logger.info(f"Filtering out job '{job_data.get('title', 'N/A')}' (Ext.ID: {job_id_for_log}). Reason: {filter_reason}")
-                self.event_bus.publish(JOB_FILTERED, reason=filter_reason, **job_data)
+                self.event_bus.publish(EventType.JOB_FILTERED, reason=filter_reason, **job_data)
             else:
                 logger.info(f"Keeping job '{job_data.get('title', 'N/A')}' (Ext.ID: {job_id_for_log})")
-                self.event_bus.publish(JOB_KEPT, **job_data)
+                self.event_bus.publish(EventType.JOB_KEPT, **job_data)
                 kept_jobs.append(job_data)
         
         logger.info(f"JobFilterer: Filtering completed. Kept {len(kept_jobs)} out of {len(jobs)} initial jobs.")
         return kept_jobs
+
+    def filter_jobs(self, jobs: List[Dict[str, Any]], options: Optional[FilterOptions] = None) -> List[Tuple[Dict[str, Any], str]]:
+        """
+        Filter jobs based on configured rules.
+        
+        Args:
+            jobs: List of job data dictionaries
+            options: Optional filtering configuration
+            
+        Returns:
+            List of tuples containing filtered jobs and their filter reasons
+        """
+        filtered_jobs = []
+        
+        for job in jobs:
+            # Check each filter rule
+            filter_reason = self._check_filters(job)
+            
+            if filter_reason:
+                # Job matched a filter rule
+                filtered_jobs.append((job, filter_reason))
+                self.event_bus.publish(EventType.JOB_FILTERED, reason=filter_reason, **job)
+            else:
+                # Job passed all filters
+                self.event_bus.publish(EventType.JOB_KEPT, **job)
+                
+        return filtered_jobs
+        
+    def _check_filters(self, job: Dict[str, Any]) -> Optional[str]:
+        """Check a job against all filter rules."""
+        for filter_rule in self.filters:
+            try:
+                if filter_rule.matches(job):
+                    return filter_rule.reason
+            except Exception as e:
+                logger.error(f"Error applying filter rule: {e}")
+                self.event_bus.publish(
+                    EventType.FILTER_ERROR,
+                    error=str(e),
+                    rule=str(filter_rule),
+                    type="FilterRuleError"
+                )
+                
+        return None
+        
+    def add_filter(self, pattern: str, reason: str, field: str = "title") -> None:
+        """Add a new filter rule."""
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+            self.filters.append(FilterRule(regex, field, reason))
+        except re.error as e:
+            msg = f"Invalid regex pattern '{pattern}': {e}"
+            logger.error(msg)
+            self.event_bus.publish(
+                EventType.FILTER_ERROR,
+                error=msg,
+                pattern=pattern,
+                type="RegexCompileError"
+            )
+            
+    def load_filters_from_file(self, file_path: Path) -> None:
+        """Load filter rules from a file."""
+        try:
+            with open(file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        pattern, reason = line.split('|', 1)
+                        self.add_filter(pattern.strip(), reason.strip())
+        except FileNotFoundError:
+            msg = f"Filter file not found: {file_path}"
+            logger.error(msg)
+            self.event_bus.publish(
+                EventType.FILTER_ERROR,
+                error=msg,
+                file_path=str(file_path),
+                type="FilterFileLoadError"
+            )
+        except Exception as e:
+            msg = f"Error loading filters from {file_path}: {e}"
+            logger.error(msg)
+            self.event_bus.publish(
+                EventType.FILTER_ERROR,
+                error=msg,
+                file_path=str(file_path),
+                type="FilterFileUnexpectedError"
+            )
+            
+class FilterRule:
+    """A single filter rule with pattern and reason."""
+    
+    def __init__(self, pattern: re.Pattern, field: str, reason: str):
+        self.pattern = pattern
+        self.field = field
+        self.reason = reason
+        
+    def matches(self, job: Dict[str, Any]) -> bool:
+        """Check if a job matches this filter rule."""
+        value = job.get(self.field, '')
+        if not value:
+            return False
+        return bool(self.pattern.search(str(value)))

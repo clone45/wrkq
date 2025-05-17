@@ -161,17 +161,32 @@ class JobPipeline:
             **kwargs: Key-value pairs to update in the progress display
         """
         if self.progress:
+            # Log current state before update
+            current_filtered = self.progress.stats.jobs_filtered_out if hasattr(self.progress.stats, 'jobs_filtered_out') else 0
+            current_total = self.progress.stats.total_jobs_found if hasattr(self.progress.stats, 'total_jobs_found') else 0
+            logger.info(f"Pipeline filter progress - Current state: filtered={current_filtered}, total={current_total}")
+            
             # Only update the status message to avoid messing with global counters
             if 'status_message' in kwargs:
+                logger.debug(f"Updating status message: {kwargs['status_message']}")
                 self.progress.update(status_message=kwargs['status_message'])
 
             # Only update filter counts if jobs_filtered_out is provided
             if 'jobs_filtered_out' in kwargs:
+                new_filtered = current_filtered + kwargs['jobs_filtered_out']
+                logger.info(f"Updating filtered count: {current_filtered} -> {new_filtered} "
+                           f"(Adding {kwargs['jobs_filtered_out']} newly filtered jobs)")
+                
                 self.progress.update(
-                    jobs_filtered_out=self.progress.stats.jobs_filtered_out + kwargs['jobs_filtered_out'],
+                    jobs_filtered_out=new_filtered,
                     status_message=kwargs.get('status_message', self.progress.stats.status_message)
                 )
+                
+                # Calculate and log remaining jobs
+                old_remaining = current_total - current_filtered
                 self.progress.stats.calculate_remaining()
+                new_remaining = self.progress.stats.jobs_remaining
+                logger.info(f"Updated remaining jobs: {old_remaining} -> {new_remaining}")
 
     def _db_progress_callback(self, job_idx, total_jobs, success_count, error_count):
         """

@@ -54,7 +54,9 @@ def _parse_job_details_from_embedded_json(html_content: str) -> Optional[Dict[st
                             full_json_data = potential_full_json
                             break
             if job_posting_data:
-                 break
+                logger.debug(f"Raw job posting data keys: {job_posting_data.keys()}")
+                logger.debug(f"Sample data: {json.dumps({k: job_posting_data[k] for k in list(job_posting_data.keys())[:5]}, indent=2)}")
+                break
         except json.JSONDecodeError:
             logger.debug(f"Tag {tag.get('id')} in job detail page is not valid JSON.")
             continue
@@ -104,10 +106,16 @@ def _parse_job_details_from_embedded_json(html_content: str) -> Optional[Dict[st
             timestamp_ms = job_posting_data.get('listedAt')
             if isinstance(timestamp_ms, (int, float)):
                 post_date = datetime.fromtimestamp(timestamp_ms / 1000.0)
-                extracted_details['posted_date_str'] = post_date.strftime('%Y-%m-%d') # Keep as string
+                # Change this line to use both field names for compatibility
+                extracted_details['posted_date'] = post_date.strftime('%Y-%m-%d')
+                extracted_details['posting_date'] = post_date.strftime('%Y-%m-%d')
+            else:
+                extracted_details['posted_date'] = str(timestamp_ms)
+                extracted_details['posting_date'] = str(timestamp_ms)
         except Exception as e:
-            logger.debug(f"Error parsing job post date from details: {e}")
-            extracted_details['posted_date_str'] = str(job_posting_data.get('listedAt'))
+            logger.error(f"Error parsing job post date: {e}")
+            extracted_details['posted_date'] = 'Unknown'
+            extracted_details['posting_date'] = 'Unknown'
 
     employment_type_obj = job_posting_data.get('employmentStatus', {})
     if isinstance(employment_type_obj, dict):
@@ -207,10 +215,10 @@ def _extract_job_card_from_search_html_node(card_node: BeautifulSoup) -> Optiona
             job_id_match = re.search(r'jobPosting:(\d+)', entity_urn)
             if job_id_match: job_data['job_id'] = job_id_match.group(1)
 
-        title_elem = card_node.select_one('.base-search-card__title, .job-card-list__title') # Added another common title selector
+        title_elem = card_node.select_one('.base-search-card__title, .job-card-list__title')
         if title_elem: job_data['title'] = title_elem.get_text(strip=True)
 
-        company_elem = card_node.select_one('.base-search-card__subtitle a, .job-card-container__company-name') # Added another
+        company_elem = card_node.select_one('.base-search-card__subtitle a, .job-card-container__company-name')
         if company_elem: 
             job_data['company'] = company_elem.get_text(strip=True)
         else: # Fallback for company if not in a link
@@ -218,14 +226,16 @@ def _extract_job_card_from_search_html_node(card_node: BeautifulSoup) -> Optiona
             if company_elem_span: job_data['company'] = company_elem_span.get_text(strip=True)
 
 
-        location_elem = card_node.select_one('.job-search-card__location, .job-card-container__metadata-item') # Added another
+        location_elem = card_node.select_one('.job-search-card__location, .job-card-container__metadata-item')
         if location_elem: job_data['location'] = location_elem.get_text(strip=True)
 
-        date_elem = card_node.select_one('time.job-search-card__listdate, time.job-card-list__listed-date') # Added another
+        date_elem = card_node.select_one('time.job-search-card__listdate, time.job-card-list__listed-date')
         if date_elem:
-            job_data['posted_date_str'] = date_elem.get('datetime', date_elem.get_text(strip=True))
+            date_value = date_elem.get('datetime', date_elem.get_text(strip=True))
+            job_data['posted_date'] = date_value
+            job_data['posting_date'] = date_value # Use both field names for compatibility
 
-        url_elem = card_node.select_one('a.base-card__full-link, a.job-card-list__title') # Added another
+        url_elem = card_node.select_one('a.base-card__full-link, a.job-card-list__title')
         if url_elem and url_elem.get('href'):
             job_data['url'] = url_elem['href']
             # Try to extract job_id from URL if not found from entity_urn
@@ -339,11 +349,16 @@ def _extract_job_from_search_api_json_item(item_json: Dict[str, Any]) -> Optiona
     if listed_at:
         try:
             if isinstance(listed_at, (int, float)):
-                job_data['posted_date_str'] = datetime.fromtimestamp(listed_at / 1000.0).strftime('%Y-%m-%d')
-            else: # Assume it's already a string
-                job_data['posted_date_str'] = str(listed_at)
+                date_str = datetime.fromtimestamp(listed_at / 1000.0).strftime('%Y-%m-%d')
+                job_data['posted_date'] = date_str
+                job_data['posting_date'] = date_str  # Add both field names
+            else:
+                job_data['posted_date'] = str(listed_at)
+                job_data['posting_date'] = str(listed_at)
         except:
-            job_data['posted_date_str'] = str(listed_at) # Fallback
+            job_data['posted_date'] = str(listed_at)
+            job_data['posting_date'] = str(listed_at)
+            
     elif item_json.get('primary Zusatzinformationen', {}).get('text'): # German "additional information"
          job_data['posted_date_str'] = item_json.get('primary Zusatzinformationen', {}).get('text')
 

@@ -1,0 +1,30 @@
+{
+  "workflows": [
+    {
+      "name": "default",
+      "description": "Default LinkedIn job search workflow",
+      "max_age_hours": 48,
+      "max_pages": 3,
+      "jobs_per_page": 25,
+      "delay_between_requests": 10,
+      "urls": [
+        "https://www.linkedin.com/jobs/search/?keywords=Python+Developer&f_WT=2&f_TPR=r86400",
+        "https://www.linkedin.com/jobs/search/?keywords=Data+Engineer&f_WT=2&f_TPR=r86400",
+        "https://www.linkedin.com/jobs/search/?keywords=Software+Engineer&f_WT=2&f_TPR=r86400"
+      ]
+    },
+    {
+      "name": "tech_management",
+      "description": "Search for tech management positions in San Francisco",
+      "max_age_hours": 24,
+      "max_pages": 5,
+      "delay_between_requests": 10,
+      "urls": [
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=software%20engineering%20manager",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22engineering%20manager%22",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=development%20manager",
+        "https://www.linkedin.com/jobs/search/?f_TPR=r86400&f_WT=2&keywords=%22technical%20product%20manager%22"
+      ]
+    }
+  ]
+}

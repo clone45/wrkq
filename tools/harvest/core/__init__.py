@@ -7,7 +7,7 @@ from .mock_filterer import MockFilterer
 from .mock_storer import MockStorer
 from .sqlite_storer import SQLiteStorer
 from .linkedin_searcher import LinkedInSearcher
-from .linkedin_detailer import LinkedInDetailer
+from .linkedin_html_detailer import LinkedInHTMLDetailer
 from .job_filterer import JobFilterer
 
 __all__ = [
@@ -19,6 +19,10 @@ __all__ = [
     "MockStorer",
     "SQLiteStorer",
     "LinkedInSearcher",
-    "LinkedInDetailer",
+    "LinkedInHTMLDetailer",
     "JobFilterer",
 ]
+
+"""
+Core components for the harvest package.
+"""
