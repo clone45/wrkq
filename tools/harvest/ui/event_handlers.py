@@ -2,19 +2,21 @@
 
 from typing import Dict, Any, Callable
 import logging
+from ..common.stats_tracker import StatsTracker
 
 logger = logging.getLogger(__name__)
 
 class EventHandlers:
     def __init__(self, 
-                 stats_dict: Dict[str, Any],
+                 stats_tracker: StatsTracker,
                  update_callback: Callable, 
                  begin_phase_callback: Callable, 
                  update_phase_callback: Callable, 
                  add_event_callback: Callable,
                  job_progress=None,
                  current_operation_id_getter=None):
-        self.stats = stats_dict
+        """Initialize event handlers."""
+        self.stats_tracker = stats_tracker
         self.update_stats_display = update_callback
         self.begin_phase = begin_phase_callback
         self.update_phase = update_phase_callback
@@ -24,53 +26,46 @@ class EventHandlers:
         self.job_progress = job_progress
         self.current_operation_id_getter = current_operation_id_getter
         
-    def handle_pipeline_started(self, event_type: str, **data): # Add event_type for consistency
-        # start_time should be set by the pipeline when it starts, or here by RichProgressDisplay
-        self.update_stats_display(
+    def handle_pipeline_started(self, event_type: str, **data):
+        self.stats_tracker.update(
             urls_total=data.get('url_count', 0),
-            # start_time=time.time(), # RichProgressDisplay sets its own start_time
             status_message="Pipeline started"
         )
+        self.update_stats_display()
         self.add_event("Pipeline", f"Started processing {data.get('url_count', 0)} URLs")
         
     def handle_pipeline_completed(self, event_type: str, **data):
-        self.update_stats_display(status_message="Pipeline completed")
+        self.stats_tracker.update(status_message="Pipeline completed")
+        self.update_stats_display()
         self.add_event("Pipeline", "Processing completed")
         
     def handle_url_started(self, event_type: str, **data):
         url = data.get('url', '')
-        # The stats 'urls_processed' and 'urls_total' are already in self.stats
-        # This handler updates 'current_url' and 'status_message'
-        # 'urls_processed' is incremented in handle_url_completed
-        self.update_stats_display(
+        self.stats_tracker.update(
             current_url=url,
-            status_message=f"Processing URL {self.stats['urls_processed'] + 1}/{self.stats['urls_total']}"
+            status_message=f"Processing URL {self.stats_tracker.stats.urls_processed + 1}/{self.stats_tracker.stats.urls_total}"
         )
-        self.add_event("URL", f"Started processing: {url[:50]}...") # Increased length
+        self.update_stats_display()
+        self.add_event("URL", f"Started processing: {url[:50]}...")
         
     def handle_url_completed(self, event_type: str, **data):
-        # Increment based on current stats, then update display
-        self.stats['urls_processed'] += 1
-        self.update_stats_display(urls_processed=self.stats['urls_processed']) # Trigger UI update
+        self.stats_tracker.increment('urls_processed')
+        self.update_stats_display()
         
         url = data.get('url', '')
-        jobs_found_for_url = data.get('jobs_found', 0) # Jobs found for *this* URL
-        # The overall 'jobs_found' stat is updated by handle_search_completed
+        jobs_found_for_url = data.get('jobs_found', 0)
         self.add_event("URL", f"Completed URL ({jobs_found_for_url} jobs found)")
         
     def handle_search_started(self, event_type: str, **data):
-        # Assuming search phase 'total' is number of pages or 100 for percentage
-        # Let's make total for phases more dynamic based on component if possible
-        # For now, 100 for percentage is fine for search phase.
-        self.begin_phase("Searching", data.get('total_pages_for_search', 100)) 
-        self.update_stats_display(status_message="Searching for jobs...")
+        self.begin_phase("Searching", data.get('total_pages_for_search', 100))
+        self.stats_tracker.update(status_message="Searching for jobs...")
+        self.update_stats_display()
         self.add_event("Search", f"Started search for: {data.get('url', 'N/A')[:50]}...")
         
     def handle_search_page(self, event_type: str, **data):
         page = data.get('page', 0)
         total_pages = data.get('total_pages', self.begin_phase_total or 1)
         
-        # Check if we have a job_progress and current_operation_id before trying to update
         if self.begin_phase_total and total_pages != self.begin_phase_total and self.job_progress and self.current_operation_id:
             self.job_progress.update(self.current_operation_id, total=total_pages)
             self.begin_phase_total = total_pages
@@ -79,21 +74,18 @@ class EventHandlers:
         self.add_event("Search", f"Fetched page {page}/{total_pages}")
         
     def handle_search_completed(self, event_type: str, **data):
-        jobs_found_in_search = data.get('jobs_found', 0) # Jobs found in *this* search operation
+        jobs_found_in_search = data.get('jobs_found', 0)
+        self.stats_tracker.increment('jobs_found', jobs_found_in_search)
+        self.update_stats_display()
         
-        self.stats['jobs_found'] += jobs_found_in_search # Accumulate
-        self.update_stats_display(jobs_found=self.stats['jobs_found']) # Trigger UI update
-        
-        self.update_phase(self.begin_phase_total or 100, "Search completed") # Mark phase as complete
+        self.update_phase(self.begin_phase_total or 100, "Search completed")
         self.add_event("Search", f"Search op. completed: {jobs_found_in_search} jobs found")
         
-    def handle_job_found(self, event_type: str, **data): # This event is mostly for 'current_job' display
+    def handle_job_found(self, event_type: str, **data):
         job_title = data.get('title', 'Unknown')
         company = data.get('company', 'Unknown')
-        # 'jobs_found' is incremented by handle_search_completed which gets total for a search op
-        self.update_stats_display(current_job=f"{job_title} at {company}")
-        # Optionally add an event here, but might be too noisy if 'Search op. completed' is also there.
-        # self.add_event("Job", f"Found: {job_title[:30]}...")
+        self.stats_tracker.update(current_job=f"{job_title} at {company}")
+        self.update_stats_display()
         
     def handle_job_kept(self, event_type: str, **data):
         job_title = data.get('title', 'Unknown')
@@ -107,39 +99,29 @@ class EventHandlers:
         company = data.get('company', 'Unknown')
         
         # Log the current state before update
-        old_filtered_count = self.stats.get('jobs_filtered_out', 0)
-        total_jobs = self.stats.get('jobs_found', 0)
+        old_filtered_count = self.stats_tracker.stats.jobs_filtered_out
+        total_jobs = self.stats_tracker.stats.jobs_found
         logger.info(f"Filtering job '{job_title}' (ID: {job_id}) at {company} - Current stats: filtered={old_filtered_count}, total={total_jobs}")
         
-        # Update jobs_filtered_out instead of jobs_filtered to match pipeline stats
-        self.stats['jobs_filtered_out'] = old_filtered_count + 1
-        new_filtered_count = self.stats['jobs_filtered_out']
+        # Update filtered count
+        self.stats_tracker.increment('jobs_filtered_out')
+        new_filtered_count = self.stats_tracker.stats.jobs_filtered_out
         
         # Log the update
         logger.info(f"Updated filtered count: {old_filtered_count} -> {new_filtered_count} (Reason: {reason})")
         
-        self.update_stats_display(jobs_filtered_out=new_filtered_count)
-        
-        # Calculate and log remaining jobs
-        if hasattr(self.stats, 'calculate_remaining'):
-            old_remaining = getattr(self.stats, 'jobs_remaining', total_jobs - old_filtered_count)
-            self.stats.calculate_remaining()
-            new_remaining = self.stats.jobs_remaining
-            logger.info(f"Updated remaining jobs: {old_remaining} -> {new_remaining} (Total: {total_jobs}, Filtered: {new_filtered_count})")
-        
+        self.update_stats_display()
         self.add_event("Filter", f"Filtered: {job_title[:30]}.. ({reason[:20]})")
         
     def handle_job_basic_stored(self, event_type: str, **data):
         job_title = data.get('title', 'Unknown')
         company = data.get('company', 'Unknown')
         
-        self.stats['jobs_stored'] += 1 # Increment based on event occurrence
-        self.update_stats_display(jobs_stored=self.stats['jobs_stored'])
+        self.stats_tracker.increment('jobs_stored')
+        self.update_stats_display()
         self.add_event("Storage", f"Stored basic: {job_title[:30]}...")
         
     def handle_job_details_stored(self, event_type: str, **data):
-        # This event signifies that details for an *already counted* stored job were updated.
-        # So, we don't increment 'jobs_stored' again here.
         job_title = data.get('title', 'Unknown')
         self.add_event("Storage", f"Stored details: {job_title[:30]}...")
         
@@ -152,33 +134,55 @@ class EventHandlers:
         job_title = data.get('title', 'Unknown')
         company = data.get('company', 'Unknown')
         
-        self.stats['jobs_duplicate'] += 1  # Increment based on event occurrence
-        self.update_stats_display(jobs_duplicate=self.stats['jobs_duplicate'])
+        self.stats_tracker.increment('jobs_duplicate')
+        self.update_stats_display()
         self.add_event("Duplicate", f"Duplicate job: {job_title[:30]} at {company[:20]}")
 
-    def handle_error(self, event_type: str, **data): # event_type will be e.g., SEARCH_ERROR
-        error_source_type = data.get('error_type', event_type.replace('_error', '').capitalize()) # Use provided type or derive
+    def handle_error(self, event_type: str, **data):
+        error_source_type = data.get('error_type', event_type.replace('_error', '').capitalize())
         error_msg = data.get('error', 'Unknown error')
         
-        self.stats['errors'] += 1 # Increment based on event occurrence
-        self.update_stats_display(errors=self.stats['errors'])
+        self.stats_tracker.increment('errors')
+        self.update_stats_display()
         
-        log_msg_parts = [f"{error_source_type}: {error_msg[:60]}"] # Truncate long messages for event log
+        log_msg_parts = [f"{error_source_type}: {error_msg[:60]}"]
         if data.get('job_id'): log_msg_parts.append(f"(Job ID: {data.get('job_id')})")
         elif data.get('url'): log_msg_parts.append(f"(URL: {data.get('url')[:30]}..)")
         
         self.add_event("Error", " ".join(log_msg_parts))
 
-    # Helper property for phases
+    def handle_detail_started(self, event_type: str, **data):
+        """Handle the start of detail fetching."""
+        total_jobs = data.get('total_jobs', 0)
+        self.begin_phase("Fetching Details", total_jobs)
+        self.stats_tracker.update(status_message="Fetching job details...")
+        self.update_stats_display()
+        self.add_event("Details", f"Started fetching details for {total_jobs} jobs")
+
+    def handle_job_details(self, event_type: str, **data):
+        """Handle when job details are fetched."""
+        job_title = data.get('title', 'Unknown')
+        company = data.get('company', 'Unknown')
+        self.stats_tracker.increment('jobs_detailed')
+        self.update_stats_display()
+        self.add_event("Details", f"Fetched details: {job_title[:30]}...")
+
+    def handle_detail_completed(self, event_type: str, **data):
+        """Handle completion of detail fetching."""
+        total_detailed = data.get('jobs_detailed', 0)
+        self.update_phase(total_detailed, "Detail fetching completed")
+        self.add_event("Details", f"Completed fetching details for {total_detailed} jobs")
+
     @property
     def begin_phase_total(self):
+        """Helper property for phases"""
         if self.job_progress and self.current_operation_id is not None and self.current_operation_id in self.job_progress._tasks:
             return self.job_progress._tasks[self.current_operation_id].total
         return None
     
-
     @property
     def current_operation_id(self):
+        """Helper property for getting current operation ID"""
         if self.current_operation_id_getter:
             return self.current_operation_id_getter()
         return None

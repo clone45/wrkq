@@ -1,24 +1,25 @@
 # harvest/interfaces/pipeline.py
 
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
-from .job_state import JobState, JobStatus, JobEvent
+from .job_state import JobState, JobStatus
+from .event_bus import EventBus
+from .searcher import SearcherInterface, SearchOptions
+from .detailer import DetailerInterface, DetailOptions
+from .storer import StorerInterface, StorageOptions
+from .preprocessor import PreProcessorInterface, PreProcessorOptions
+from .postprocessor import PostProcessorInterface, PostProcessorOptions
 from .job_iterator import JobIteratorOptions
-from .preprocessor import PreProcessorOptions
-from .postprocessor import PostProcessorOptions
-from .searcher import SearchOptions
-from .detailer import DetailOptions
-from .storer import StorageOptions
+from dataclasses import dataclass
 
 @dataclass
 class PipelineConfig:
     """Configuration for the job processing pipeline"""
-    search_options: SearchOptions
-    iterator_options: JobIteratorOptions
-    preprocessor_options: PreProcessorOptions
-    detail_options: DetailOptions
-    postprocessor_options: PostProcessorOptions
-    storage_options: StorageOptions
+    search_options: Optional[SearchOptions] = None
+    detail_options: Optional[DetailOptions] = None
+    storage_options: Optional[StorageOptions] = None
+    preprocessor_options: Optional[PreProcessorOptions] = None
+    postprocessor_options: Optional[PostProcessorOptions] = None
+    iterator_options: Optional[JobIteratorOptions] = None
 
 class PipelineInterface:
     """Interface for the job processing pipeline"""

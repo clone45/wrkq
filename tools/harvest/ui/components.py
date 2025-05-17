@@ -13,6 +13,7 @@ from rich.console import Console, Group # Console, Group not directly used in th
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from ..common.stats_tracker import JobStats
 
 logger = logging.getLogger(__name__)
 
@@ -39,21 +40,21 @@ def format_time(seconds: float) -> str:
         seconds_rem %= 60
         return f"{hours}h {minutes}m {seconds_rem:.1f}s"
 
-def create_stats_table(stats: Dict[str, Any]) -> Table:
+def create_stats_table(stats: JobStats) -> Table:
     """
     Create a table showing statistics.
     Long values are truncated with ellipsis.
     
     Args:
-        stats: Dictionary of statistics
+        stats: JobStats object containing current statistics
         
     Returns:
         Rich Table object
     """
     # Log current stats state
-    logger.debug(f"Creating stats table with stats: jobs_found={stats.get('jobs_found', 0)}, "
-                f"jobs_filtered_out={stats.get('jobs_filtered_out', 0)}, "
-                f"jobs_stored={stats.get('jobs_stored', 0)}")
+    logger.debug(f"Creating stats table with stats: jobs_found={stats.jobs_found}, "
+                f"jobs_filtered_out={stats.jobs_filtered_out}, "
+                f"jobs_stored={stats.jobs_stored}")
     
     # Create stats table
     stats_table = Table(show_header=False, box=None, padding=(0, 1))
@@ -61,42 +62,36 @@ def create_stats_table(stats: Dict[str, Any]) -> Table:
     stats_table.add_column("Value", ratio=1)
     
     # URL info and status
-    if stats.get('current_url'):
+    if stats.current_url:
         stats_table.add_row(
             "Current URL:", 
-            Text(stats['current_url'], no_wrap=True, overflow="ellipsis")
+            Text(stats.current_url, no_wrap=True, overflow="ellipsis")
         )
         
     stats_table.add_row(
         "Status:", 
-        Text(str(stats.get('status_message', 'N/A')), no_wrap=True, overflow="ellipsis")
+        Text(str(stats.status_message), no_wrap=True, overflow="ellipsis")
     )
     
     # Job counts with logging
-    jobs_found = stats.get('jobs_found', 0)
-    jobs_filtered = stats.get('jobs_filtered_out', 0)
-    jobs_stored = stats.get('jobs_stored', 0)
-    jobs_duplicate = stats.get('jobs_duplicate', 0)
+    logger.info(f"Displaying job counts - Found: {stats.jobs_found}, Filtered: {stats.jobs_filtered_out}, "
+               f"Stored: {stats.jobs_stored}, Duplicate: {stats.jobs_duplicate}")
     
-    logger.info(f"Displaying job counts - Found: {jobs_found}, Filtered: {jobs_filtered}, "
-               f"Stored: {jobs_stored}, Duplicate: {jobs_duplicate}")
-    
-    stats_table.add_row("Jobs Found:", str(jobs_found))
-    stats_table.add_row("Duplicates:", str(jobs_duplicate))
-    stats_table.add_row("Filtered:", str(jobs_filtered))
-    stats_table.add_row("Stored:", str(jobs_stored))
+    stats_table.add_row("Jobs Found:", str(stats.jobs_found))
+    stats_table.add_row("Duplicates:", str(stats.jobs_duplicate))
+    stats_table.add_row("Filtered:", str(stats.jobs_filtered_out))
+    stats_table.add_row("Stored:", str(stats.jobs_stored))
     
     # Calculate and log remaining jobs
-    remaining_jobs = jobs_found - jobs_filtered
-    logger.info(f"Calculated remaining jobs: {remaining_jobs} (Found: {jobs_found} - Filtered: {jobs_filtered})")
+    logger.info(f"Calculated remaining jobs: {stats.jobs_remaining} "
+               f"(Found: {stats.jobs_found} - Filtered: {stats.jobs_filtered_out})")
     
-    errors_count = stats.get('errors', 0)
-    if errors_count > 0:
-        stats_table.add_row("Errors:", Text(str(errors_count), style="bold red"))
-        logger.warning(f"Displaying {errors_count} errors in stats table")
+    if stats.errors > 0:
+        stats_table.add_row("Errors:", Text(str(stats.errors), style="bold red"))
+        logger.warning(f"Displaying {stats.errors} errors in stats table")
     
     # Time information
-    elapsed_seconds = time.time() - stats.get('start_time', time.time())
+    elapsed_seconds = time.time() - stats.start_time
     stats_table.add_row("Elapsed Time:", format_time(elapsed_seconds))
     
     return stats_table
@@ -166,50 +161,43 @@ def get_event_style(event_type: str) -> str:
     }
     return event_styles.get(event_type, "dim cyan")
 
-def create_summary_table(stats: Dict[str, Any]) -> Table:
+def create_summary_table(stats: JobStats) -> Table:
     """
     Create a summary table for final display.
     
     Args:
-        stats: Dictionary of statistics
+        stats: JobStats object containing current statistics
         
     Returns:
         Rich Table object
     """
     # Log summary stats
     logger.info(f"Creating final summary table with stats: "
-               f"URLs={stats.get('urls_processed', 0)}, "
-               f"Total Jobs={stats.get('jobs_found', 0)}, "
-               f"Filtered={stats.get('jobs_filtered_out', 0)}, "
-               f"Stored={stats.get('jobs_stored', 0)}")
+               f"URLs={stats.urls_processed}, "
+               f"Total Jobs={stats.jobs_found}, "
+               f"Filtered={stats.jobs_filtered_out}, "
+               f"Stored={stats.jobs_stored}")
     
     table = Table(show_header=False, title="[bold]Summary[/bold]", title_style="bold white on blue", box=None)
     table.add_column("Statistic", style="dim", min_width=20)
     table.add_column("Value", justify="right")
     
     # Add rows with logging
-    urls_processed = stats.get('urls_processed', 0)
-    total_jobs = stats.get('jobs_found', 0)
-    duplicate_jobs = stats.get('jobs_duplicate', 0)
-    filtered_jobs = stats.get('jobs_filtered_out', 0)
-    stored_jobs = stats.get('jobs_stored', 0)
-    
-    table.add_row("URLs Processed", str(urls_processed))
-    table.add_row("Total Jobs Found", str(total_jobs))
-    table.add_row("Duplicate Jobs Found", str(duplicate_jobs))
-    table.add_row("Jobs Filtered Out", str(filtered_jobs))
-    table.add_row("Jobs Stored", str(stored_jobs))
+    table.add_row("URLs Processed", str(stats.urls_processed))
+    table.add_row("Total Jobs Found", str(stats.jobs_found))
+    table.add_row("Duplicate Jobs Found", str(stats.jobs_duplicate))
+    table.add_row("Jobs Filtered Out", str(stats.jobs_filtered_out))
+    table.add_row("Jobs Stored", str(stats.jobs_stored))
     
     # Log the final job processing breakdown
     logger.info(f"Job processing breakdown in summary - "
-               f"Total: {total_jobs}, Filtered: {filtered_jobs}, "
-               f"Duplicates: {duplicate_jobs}, Stored: {stored_jobs}")
+               f"Total: {stats.jobs_found}, Filtered: {stats.jobs_filtered_out}, "
+               f"Duplicates: {stats.jobs_duplicate}, Stored: {stats.jobs_stored}")
     
-    errors_count = stats.get('errors', 0)
-    error_style = "bold red" if errors_count > 0 else ""
-    table.add_row("Errors Encountered", Text(str(errors_count), style=error_style))
+    error_style = "bold red" if stats.errors > 0 else ""
+    table.add_row("Errors Encountered", Text(str(stats.errors), style=error_style))
     
-    elapsed_seconds = time.time() - stats.get('start_time', time.time())
+    elapsed_seconds = time.time() - stats.start_time
     table.add_row("Total Time", format_time(elapsed_seconds))
     
     return table

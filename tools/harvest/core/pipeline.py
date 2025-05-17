@@ -14,6 +14,7 @@ from ..interfaces.job_state import JobStatus
 from ..interfaces.job_iterator import JobIteratorInterface, JobIteratorOptions
 from ..interfaces.preprocessor import PreProcessorInterface
 from ..interfaces.postprocessor import PostProcessorInterface
+from ..common.stats_tracker import StatsTracker
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,7 @@ class Pipeline(PipelineInterface):
         self.postprocessor = postprocessor
         self.storer = storer
         self.default_config = default_config
-        self.stats = {
-            "jobs_found": 0,
-            "jobs_filtered_pre": 0,
-            "jobs_detailed": 0,
-            "jobs_filtered_post": 0,
-            "jobs_stored": 0,
-            "jobs_failed": 0,
-            "jobs_duplicate": 0
-        }
+        self.stats_tracker = StatsTracker()
         logger.info("Core Pipeline initialized.")
 
     def _get_effective_config(self, config_override: Optional[PipelineConfig]) -> Optional[PipelineConfig]:
@@ -64,21 +57,10 @@ class Pipeline(PipelineInterface):
 
     def _process_jobs_through_pipeline(self, config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """Internal helper to process jobs through the pipeline stages."""
-        stats = {
-            "jobs_found": 0,
-            "jobs_filtered_pre": 0,
-            "jobs_detailed": 0,
-            "jobs_filtered_post": 0,
-            "jobs_stored": 0,
-            "jobs_failed": 0,
-            "jobs_duplicate": 0,
-            "errors": 0
-        }
-
         logger.info(f"Starting to process {self.job_iterator.total_jobs} jobs through pipeline")
         
         for job_state in self.job_iterator:
-            stats["jobs_found"] += 1
+            self.stats_tracker.increment('jobs_found')
             job_id = job_state.job_id
             logger.info(f"Processing job {job_id} (Status: {job_state.status})")
             self.event_bus.publish(EventType.JOB_FOUND, job_id=job_id)
@@ -94,9 +76,9 @@ class Pipeline(PipelineInterface):
                     logger.info(f"Job {job_id}: Preprocessing complete, new status: {job_state.status}")
                     
                     if job_state.status == JobStatus.FILTERED_PRE:
-                        stats["jobs_filtered_pre"] += 1
+                        self.stats_tracker.increment('jobs_filtered_out')
                         if "Duplicate" in job_state.filter_reason:
-                            stats["jobs_duplicate"] += 1
+                            self.stats_tracker.increment('jobs_duplicate')
                             logger.info(f"Job {job_id}: Found duplicate - {job_state.filter_reason}")
                             self.event_bus.publish(
                                 EventType.JOB_DUPLICATE_FOUND,
@@ -107,7 +89,6 @@ class Pipeline(PipelineInterface):
                             )
                         else:
                             logger.info(f"Job {job_id}: Filtered in preprocessing - {job_state.filter_reason}")
-                            # Publish JOB_FILTERED event for UI stats tracking
                             self.event_bus.publish(
                                 EventType.JOB_FILTERED,
                                 job_id=job_id,
@@ -123,7 +104,7 @@ class Pipeline(PipelineInterface):
                         continue
                         
                     if job_state.status == JobStatus.FAILED:
-                        stats["jobs_failed"] += 1
+                        self.stats_tracker.increment('jobs_failed')
                         logger.info(f"Job {job_id}: Failed in preprocessing - {job_state.error_message}")
                         self.event_bus.publish(
                             EventType.JOB_FAILED,
@@ -144,11 +125,10 @@ class Pipeline(PipelineInterface):
                         )[0]  # Get first result since we're processing one at a time
                         job_state.data.update(detailed_data)
                         job_state.mark_details_fetched()
-                        stats["jobs_detailed"] += 1
                         logger.info(f"Job {job_id}: Detail fetch complete")
                     except Exception as e:
                         job_state.mark_failed(str(e), "detail_fetch")
-                        stats["jobs_failed"] += 1
+                        self.stats_tracker.increment('jobs_failed')
                         logger.error(f"Job {job_id}: Failed to fetch details - {str(e)}")
                         self.event_bus.publish(
                             EventType.JOB_FAILED,
@@ -169,7 +149,7 @@ class Pipeline(PipelineInterface):
                     logger.info(f"Job {job_id}: Postprocessing complete, new status: {job_state.status}")
                     
                     if job_state.status == JobStatus.FILTERED_POST:
-                        stats["jobs_filtered_post"] += 1
+                        self.stats_tracker.increment('jobs_filtered_out')
                         logger.info(f"Job {job_id}: Filtered in postprocessing - {job_state.filter_reason}")
                         self.event_bus.publish(
                             EventType.JOB_FILTERED_POST,
@@ -179,7 +159,7 @@ class Pipeline(PipelineInterface):
                         continue
                         
                     if job_state.status == JobStatus.FAILED:
-                        stats["jobs_failed"] += 1
+                        self.stats_tracker.increment('jobs_failed')
                         logger.info(f"Job {job_id}: Failed in postprocessing - {job_state.error_message}")
                         self.event_bus.publish(
                             EventType.JOB_FAILED,
@@ -198,12 +178,12 @@ class Pipeline(PipelineInterface):
                             [job_state.data],
                             config.storage_options if config else None
                         )
-                        stats["jobs_stored"] += 1
+                        self.stats_tracker.increment('jobs_stored')
                         logger.info(f"Job {job_id}: Storage complete")
                         self.event_bus.publish(EventType.JOB_STORED, job_id=job_id)
                     except Exception as e:
                         job_state.mark_failed(str(e), "storage")
-                        stats["jobs_failed"] += 1
+                        self.stats_tracker.increment('jobs_failed')
                         logger.error(f"Job {job_id}: Failed to store - {str(e)}")
                         self.event_bus.publish(
                             EventType.STORAGE_ERROR,
@@ -215,7 +195,7 @@ class Pipeline(PipelineInterface):
                     logger.info(f"Job {job_id}: Skipping storage, status: {job_state.status}")
 
             except Exception as e:
-                stats["jobs_failed"] += 1
+                self.stats_tracker.increment('jobs_failed')
                 logger.error(f"Job {job_id}: Unexpected error - {str(e)}")
                 self.event_bus.publish(
                     EventType.JOB_FAILED,
@@ -223,97 +203,70 @@ class Pipeline(PipelineInterface):
                     error=str(e)
                 )
 
-        return stats
+        return self.stats_tracker.get_summary()
 
     def process_url(self, url: str, config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """Process a single URL through the pipeline."""
         logger.info(f"Starting to process URL: {url}")
         self.event_bus.publish(EventType.URL_PROCESSING_STARTED, url=url)
         
-        url_stats = {
-            "jobs_found": 0,
-            "jobs_filtered_pre": 0,
-            "jobs_detailed": 0,
-            "jobs_filtered_post": 0,
-            "jobs_stored": 0,
-            "jobs_failed": 0,
-            "jobs_duplicate": 0,
-            "errors": 0
-        }
-        
         try:
             # Search for jobs
             found_jobs = self.searcher.search(url, config.search_options if config else None)
-            url_stats["jobs_found"] = len(found_jobs)
+            self.stats_tracker.update(current_url=url)
             
             # Process found jobs through pipeline
             job_stats = self.process_jobs(found_jobs, config)
-            url_stats.update(job_stats)
+            self.stats_tracker.increment('urls_processed')
             
         except AuthenticationError as ae:
             logger.error(f"Authentication error processing URL '{url}': {ae}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(ae), url=url, stage="url_processing", error_type="AuthenticationError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except NetworkError as ne:
             logger.error(f"Network error processing URL '{url}': {ne}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(ne), url=url, stage="url_processing", error_type="NetworkError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except ParseError as pe:
             logger.error(f"Parse error processing URL '{url}': {pe}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(pe), url=url, stage="url_processing", error_type="ParseError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except DatabaseError as dbe:
             logger.error(f"Database error processing URL '{url}': {dbe}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(dbe), url=url, stage="url_processing", error_type="DatabaseError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except ConfigError as ce:
             logger.error(f"Configuration error processing URL '{url}': {ce}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(ce), url=url, stage="url_processing", error_type="ConfigError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except HarvestError as he:
             logger.error(f"Harvest error processing URL '{url}': {he}")
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=str(he), url=url, stage="url_processing", error_type=type(he).__name__)
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
         except Exception as e:
             logger.error(f"Unexpected error processing URL '{url}': {e}", exc_info=True)
             self.event_bus.publish(EventType.PIPELINE_ERROR, error=f"Unexpected: {str(e)}", url=url, stage="url_processing", error_type="CriticalError")
-            url_stats["errors"] += 1
+            self.stats_tracker.increment('errors')
             
-        self.event_bus.publish(EventType.URL_PROCESSING_COMPLETED, url=url, **url_stats)
-        return url_stats
+        self.event_bus.publish(EventType.URL_PROCESSING_COMPLETED, url=url, **self.stats_tracker.get_summary())
+        return self.stats_tracker.get_summary()
 
     def process_urls(self, urls: List[str], config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """Process multiple URLs through the pipeline."""
         logger.info(f"Starting to process {len(urls)} URLs")
+        self.stats_tracker.update(urls_total=len(urls))
         self.event_bus.publish(EventType.PIPELINE_STARTED, url_count=len(urls))
-        
-        aggregated_stats = {
-            "jobs_found": 0,
-            "jobs_filtered_pre": 0,
-            "jobs_detailed": 0,
-            "jobs_filtered_post": 0,
-            "jobs_stored": 0,
-            "jobs_failed": 0,
-            "jobs_duplicate": 0,
-            "errors": 0,
-            "urls_processed": 0,
-            "urls_failed": 0
-        }
         
         for url in urls:
             try:
-                url_stats = self.process_url(url, config)
-                for key in url_stats:
-                    if key in aggregated_stats:
-                        aggregated_stats[key] += url_stats[key]
-                aggregated_stats["urls_processed"] += 1
+                self.process_url(url, config)
             except Exception as e:
                 logger.error(f"Critical error in URL processing loop for '{url}': {e}", exc_info=True)
                 self.event_bus.publish(EventType.PIPELINE_ERROR, error=f"Critical loop error: {str(e)}", url=url, stage="batch_url_processing_loop")
-                aggregated_stats["urls_failed"] += 1
+                self.stats_tracker.increment('urls_failed')
                 
-        self.event_bus.publish(EventType.PIPELINE_COMPLETED, **aggregated_stats)
-        return aggregated_stats
+        self.event_bus.publish(EventType.PIPELINE_COMPLETED, **self.stats_tracker.get_summary())
+        return self.stats_tracker.get_summary()
 
     def process_jobs(self, jobs: List[Dict[str, Any]], config: Optional[PipelineConfig] = None) -> Dict[str, int]:
         """Process a list of jobs through the pipeline."""
@@ -324,9 +277,11 @@ class Pipeline(PipelineInterface):
         except Exception as e:
             logger.error(f"Critical error in job processing: {e}", exc_info=True)
             self.event_bus.publish(EventType.JOB_FAILED, error=str(e))
-            return {"jobs_failed": 1, "errors": 1}
+            self.stats_tracker.increment('jobs_failed')
+            self.stats_tracker.increment('errors')
+            return self.stats_tracker.get_summary()
 
     def get_pipeline_stats(self) -> Dict[str, Any]:
         """Get current pipeline statistics."""
-        return self.stats.copy()
+        return self.stats_tracker.get_summary()
 

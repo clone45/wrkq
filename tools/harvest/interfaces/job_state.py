@@ -11,16 +11,6 @@ class JobStatus(Enum):
     COMPLETE = "complete"
     FAILED = "failed"
 
-class JobEvent(Enum):
-    JOB_FOUND = "job_found"
-    JOB_DUPLICATE_FOUND = "job_duplicate"
-    JOB_FILTERED_PRE = "job_filtered_pre"
-    JOB_DETAILS_STARTED = "job_details_started"
-    JOB_DETAILS_COMPLETED = "job_details_completed"
-    JOB_FILTERED_POST = "job_filtered_post"
-    JOB_STORED = "job_stored"
-    JOB_FAILED = "job_failed"
-
 @dataclass
 class JobState:
     """Represents the current state of a job in the pipeline"""

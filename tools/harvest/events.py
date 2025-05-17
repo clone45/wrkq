@@ -28,6 +28,7 @@ class EventType(Enum):
     JOB_KEPT = "job_kept"
     JOB_FILTERED = "job_filtered"
     JOB_FILTERED_PRE = "job_filtered_pre"
+    JOB_FILTERED_POST = "job_filtered_post"
     
     # Storage events
     JOB_BASIC_STORED = "job_basic_stored"

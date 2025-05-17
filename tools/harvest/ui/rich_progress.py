@@ -20,6 +20,7 @@ from ..interfaces.progress import ProgressDisplay
 from ..events import EventType
 from .components import create_stats_table, create_events_panel, create_summary_table
 from .event_handlers import EventHandlers
+from ..common.stats_tracker import StatsTracker
 
 logger = logging.getLogger(__name__)
 
@@ -41,21 +42,9 @@ class RichProgressDisplay(ProgressDisplay):
         self.max_recent_events = max_recent_events
         self.console = Console()
         
-        # Statistics tracking
-        self.stats = {
-            'urls_total': 0,
-            'urls_processed': 0,
-            'jobs_found': 0,
-            'jobs_duplicate': 0,
-            'jobs_detailed': 0,
-            'jobs_filtered': 0,
-            'jobs_stored': 0,
-            'errors': 0,
-            'start_time': time.time(),
-            'current_url': '',
-            'current_job': '',
-            'status_message': 'Initializing...'
-        }
+        # Initialize stats tracker
+        self.stats_tracker = StatsTracker()
+        self.stats_tracker.update(status_message="Initializing...")
         
         # Recent events tracking
         self.recent_events: List[Tuple[str, str, str]] = []
@@ -65,7 +54,7 @@ class RichProgressDisplay(ProgressDisplay):
         
         # THEN initialize event handlers with the progress bars
         self.event_handlers = EventHandlers(
-            stats_dict=self.stats,
+            stats_tracker=self.stats_tracker,
             update_callback=self.update,
             begin_phase_callback=self.begin_phase,
             update_phase_callback=self.update_phase,
@@ -107,7 +96,6 @@ class RichProgressDisplay(ProgressDisplay):
         self.current_operation_id = None
         self.operation_tasks = {}
         
-
     def _init_layout(self):
         """Initialize layout."""
         self.layout = Layout(name="root")
@@ -173,15 +161,11 @@ class RichProgressDisplay(ProgressDisplay):
     
     def update(self, **new_stats_to_display: Any) -> None:
         """
-        Update the self.stats dictionary AND trigger a display refresh.
+        Update the stats tracker and trigger a display refresh.
         This is the primary callback for EventHandlers to update the display.
         """
-        # Update statistics
-        for key, value in new_stats_to_display.items():
-            if key in self.stats:
-                self.stats[key] = value
-            else: # Log if trying to update a stat that doesn't exist (might be a typo)
-                logger.warning(f"Attempted to update non-existent stat key: {key}")
+        # Update statistics using the stats tracker
+        self.stats_tracker.update(**new_stats_to_display)
                 
         # Update the display
         self._update_display()
@@ -250,77 +234,65 @@ class RichProgressDisplay(ProgressDisplay):
             self._update_display()
     
     def _update_display(self) -> None:
-        """Update the display with current information."""
-        if not self.live or not self.live.is_started:
-            return
-            
-        # Update header
-        header_text = Text("LinkedIn Job Harvester", style="bold cyan", justify="center")
-        self.layout["header"].update(header_text)
-        
-        # Update progress bars
-        self.layout["url_progress"].update(self.url_progress)
-        self.layout["job_progress"].update(self.job_progress)
-        
-        # Update URL progress task details
-        if self.stats['urls_total'] > 0:
-            completed_urls = self.stats['urls_processed']
-            total_urls = self.stats['urls_total']
-            self.url_progress.update(
-                self.url_task_id, 
-                completed=completed_urls, 
-                total=total_urls,
-                description=f"URL {completed_urls}/{total_urls}"
-            )
-        else:
-             self.url_progress.update(
-                self.url_task_id, 
-                completed=0, 
-                total=1,
-                description="Waiting for URLs..."
-            )
-
-        # Update the stats section
-        stats_table_content = create_stats_table(self.stats)
-        self.layout["stats"].update(Panel(stats_table_content, border_style="blue", title="Statistics"))
-        
-        # Update current job
-        current_job_title = self.stats.get('current_job', '')
-        if current_job_title:
-            job_text = Text.assemble(
-                Text("Processing: ", style="green"),
-                Text(current_job_title, overflow="ellipsis", no_wrap=True)
-            )
-            self.layout["current_job"].update(job_text)
-        else:
-            self.layout["current_job"].update(Text("Idle", style="dim"))
-            
-        # Update events panel (now generating lines of text)
-        # Pass self.max_recent_events to the modified create_events_panel
-        events_panel_content = create_events_panel(self.recent_events)
-        self.layout["events"].update(events_panel_content)
-
-
-    def finalize(self) -> None:
-        """Finalize the progress display and show summary statistics."""
+        """Update all display components."""
         if not self.live:
             return
             
-        # Update one last time
-        self.stats['status_message'] = "Finalizing..."
-        self._update_display()
+        # Update URL progress task details
+        if self.stats_tracker.stats.urls_total > 0:
+            completed_urls = self.stats_tracker.stats.urls_processed
+            total_urls = self.stats_tracker.stats.urls_total
+            self.url_progress.update(
+                self.url_task_id, 
+                completed=completed_urls,
+                total=total_urls,
+                description=f"URLs: {completed_urls}/{total_urls}"
+            )
+            
+        # Update the stats section
+        stats_table_content = create_stats_table(self.stats_tracker.stats)
+        self.layout["stats"].update(Panel(stats_table_content, border_style="blue", title="Statistics"))
         
-        # Stop the live display
-        # A small sleep can help ensure the last update is rendered before stopping
-        time.sleep(0.1 * (10 / self.refresh_per_second)) # Scale sleep with refresh rate
-        self.live.stop()
+        # Update current job
+        current_job = self.stats_tracker.stats.current_job
+        if current_job:
+            job_text = Text.assemble(
+                Text("Current Job: ", style="bold"),
+                Text(current_job[:80] + "..." if len(current_job) > 80 else current_job)
+            )
+            self.layout["current_job"].update(Panel(job_text))
         
-        # Print final summary
-        self.console.print() # Add a newline for spacing
-        self.console.rule("[bold]LinkedIn Job Harvester Complete[/bold]", style="cyan")
+        # Update URL progress panel
+        self.layout["url_progress"].update(self.url_progress)
         
-        # Create a summary table
-        table = create_summary_table(self.stats)
+        # Update job progress panel
+        self.layout["job_progress"].update(self.job_progress)
         
-        self.console.print(table)
-        self.console.rule(style="cyan")
+        # Update events panel
+        events_panel = create_events_panel(self.recent_events)
+        self.layout["events"].update(events_panel)
+        
+        # Update header with status message
+        status_text = Text.assemble(
+            Text("Status: ", style="bold"),
+            Text(self.stats_tracker.stats.status_message)
+        )
+        self.layout["header"].update(Panel(status_text))
+        
+    def finalize(self) -> None:
+        """Finalize the progress display and show summary statistics."""
+        if self.live:
+            # Update one last time
+            self.stats_tracker.update(status_message="Finalizing...")
+            self._update_display()
+            
+            # Stop the live display
+            self.live.stop()
+            
+            # Print a blank line for separation
+            self.console.print()
+            
+            # Create a summary table
+            table = create_summary_table(self.stats_tracker.stats)
+            
+            self.console.print(table)
